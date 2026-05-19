@@ -13,7 +13,7 @@ export function approvedNote(args: {
   emojiName: string;
 }): string {
   const { applicantUsername, emojiName } = args;
-  return `@${applicantUsername} $[x2 :big_man:] エイエーイ！（:${emojiName}: を絵文字工場のラインに並べたよ！ ご申請ありがとね！）`;
+  return `@${applicantUsername} :ei_mantaro_bigman: エイエーイ！（:${emojiName}: を絵文字工場のラインに並べたよ！ ご申請ありがとね！）`;
 }
 
 /** 却下時に申請者に届く note */
@@ -23,7 +23,7 @@ export function rejectedNote(args: {
   reason: string;
 }): string {
   const { applicantUsername, applicationName, reason } = args;
-  return `@${applicantUsername} $[x2 :big_man:] エイ……（ごめんね、:${applicationName}: は今回採用を見送らせてもらったよ。
+  return `@${applicantUsername} :ei_mantaro_bigman: エイ……（ごめんね、:${applicationName}: は今回採用を見送らせてもらったよ。
 理由: ${reason}
 また気軽に申請してね！）`;
 }
