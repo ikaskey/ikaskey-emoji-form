@@ -60,10 +60,11 @@ export async function handleSubmit(c: Context<{ Bindings: Env }>) {
     return c.json({ ok: false, errors }, 400);
   }
 
-  // 4) R2 に保存
+  // 4) R2 に保存 (バイト列を一度だけ読んで再利用)
+  const buf = await file.arrayBuffer();
   const ext = inferExtension(file.type, file.name);
   const r2Key = `pending/${sess.userId}/${Date.now()}-${crypto.randomUUID()}${ext}`;
-  await c.env.R2.put(r2Key, file.stream(), {
+  await c.env.R2.put(r2Key, buf, {
     httpMetadata: { contentType: file.type },
     customMetadata: {
       applicantId: sess.userId,
@@ -110,6 +111,10 @@ export async function handleSubmit(c: Context<{ Bindings: Env }>) {
       ].join('\n'),
       url: `${new URL(c.req.url).origin}/admin/${applicationId ?? ''}`,
       color: 0x4ea3ff,
+      attachment: {
+        filename: `${name}${ext}`,
+        blob: new Blob([buf], { type: file.type }),
+      },
     }),
   );
 

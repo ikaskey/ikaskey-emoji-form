@@ -143,10 +143,11 @@ export function buildAdminApi() {
       return c.json({ error: `already ${row.status}` }, 409);
     }
 
-    // 1) R2 から画像を取得
+    // 1) R2 から画像を取得 (バイト列を保持して Discord 通知でも再利用)
     const obj = await c.env.R2.get(row.r2_key);
     if (!obj) return c.json({ error: 'image missing in R2' }, 410);
-    const blob = new Blob([await obj.arrayBuffer()], { type: row.mime_type });
+    const arrBuf = await obj.arrayBuffer();
+    const blob = new Blob([arrBuf], { type: row.mime_type });
 
     // 2) mantaro ドライブにアップロード
     let driveFile;
@@ -194,12 +195,17 @@ export function buildAdminApi() {
       }).catch((e) => console.error('notify note failed:', e)),
     );
 
-    // 6) Discord 通知
+    // 6) Discord 通知 (画像付き)
+    const approveFilename = `${emoji.name}${inferExt(row.mime_type)}`;
     c.executionCtx.waitUntil(
       notifyDiscord(c.env, {
         title: `採用: :${emoji.name}:`,
         description: `申請者: @${row.applicant_username}\nカテゴリ: ${row.category ?? '(未指定)'}\n決裁者: @${mod.session.username}`,
         color: 0x22c55e,
+        attachment: {
+          filename: approveFilename,
+          blob: new Blob([arrBuf], { type: row.mime_type }),
+        },
       }),
     );
 
@@ -222,6 +228,16 @@ export function buildAdminApi() {
 
     const body = (await c.req.json().catch(() => ({}))) as { reason?: string };
     const reason = (body.reason ?? '').trim() || '(理由未記入)';
+
+    // Discord 通知用に画像を先に取り出す (R2.delete より前)
+    let rejectBlob: Blob | null = null;
+    if (row.r2_key) {
+      const obj = await c.env.R2.get(row.r2_key);
+      if (obj) {
+        const arrBuf = await obj.arrayBuffer();
+        rejectBlob = new Blob([arrBuf], { type: row.mime_type });
+      }
+    }
 
     const now = new Date().toISOString();
     await c.env.DB.prepare(
@@ -248,6 +264,9 @@ export function buildAdminApi() {
         title: `却下: :${row.name}:`,
         description: `申請者: @${row.applicant_username}\n理由: ${reason}\n決裁者: @${mod.session.username}`,
         color: 0xef4444,
+        attachment: rejectBlob
+          ? { filename: `${row.name}${inferExt(row.mime_type)}`, blob: rejectBlob }
+          : undefined,
       }),
     );
 
@@ -273,6 +292,18 @@ export function buildAdminApi() {
   });
 
   return app;
+}
+
+function inferExt(mime: string): string {
+  const map: Record<string, string> = {
+    'image/png': '.png',
+    'image/jpeg': '.jpg',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+    'image/apng': '.apng',
+    'image/avif': '.avif',
+  };
+  return map[mime] ?? '';
 }
 
 async function fetchApplication(env: Env, id: number): Promise<ApplicationRow | null> {
