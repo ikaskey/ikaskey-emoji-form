@@ -65,6 +65,30 @@ export function buildApi() {
     return c.json({ applications: rs.results ?? [] });
   });
 
+  // --- 申請者: 自分の申請画像 (pending 中のみ R2 に残っている) ---
+  app.get('/api/my/applications/:id/image', async (c) => {
+    const sess = await readSession(c);
+    if (!sess) return c.text('unauthorized', 401);
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isFinite(id)) return c.text('bad id', 400);
+    const row = await c.env.DB.prepare(
+      `SELECT applicant_id, r2_key, mime_type FROM applications WHERE id = ?`,
+    )
+      .bind(id)
+      .first<{ applicant_id: string; r2_key: string; mime_type: string }>();
+    if (!row) return c.text('not found', 404);
+    if (row.applicant_id !== sess.userId) return c.text('forbidden', 403);
+    if (!row.r2_key) return c.text('no image', 404);
+    const obj = await c.env.R2.get(row.r2_key);
+    if (!obj) return c.text('image already deleted', 410);
+    return new Response(obj.body, {
+      headers: {
+        'Content-Type': row.mime_type,
+        'Cache-Control': 'private, max-age=60',
+      },
+    });
+  });
+
   // --- モデレーター ---
   app.route('/', buildAdminApi());
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Mfm } from './mfm';
 
 type Me =
   | { loggedIn: true; userId: string; username: string; name: string | null }
@@ -79,38 +80,72 @@ export function MyList() {
   return (
     <ul className="space-y-3">
       {apps.map((a) => (
-        <li key={a.id} className="rounded border border-gray-200 bg-white p-3">
-          <div className="flex items-baseline justify-between">
-            <p className="font-mono text-lg font-bold">:{a.name}:</p>
-            <StatusBadge status={a.status} />
+        <li key={a.id} className="flex gap-3 rounded border border-gray-200 bg-white p-3">
+          <Thumbnail app={a} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="font-mono text-lg font-bold break-all">:{a.name}:</p>
+              <StatusBadge status={a.status} />
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              申請日時: {new Date(a.created_at).toLocaleString('ja-JP')}
+              {' ・ '}カテゴリ: {a.category ?? '(未指定)'}
+              {a.category_is_new ? ' [新規]' : ''}
+            </p>
+            <p className="text-xs text-gray-500">エイリアス: {prettyAliases(a.aliases)}</p>
+            {a.status === 'approved' && a.registered_emoji_name && (
+              <p className="mt-2 text-sm text-green-700">
+                ✅ <code>:{a.registered_emoji_name}:</code> として登録されました
+                {a.decided_by_username && ` (by @${a.decided_by_username})`}
+                {a.decided_at && ` / ${new Date(a.decided_at).toLocaleString('ja-JP')}`}
+              </p>
+            )}
+            {a.status === 'rejected' && (
+              <p className="mt-2 text-sm text-red-700">
+                ❌ 却下されました
+                {a.decided_by_username && ` (by @${a.decided_by_username})`}
+                <br />
+                <span className="text-gray-700">理由: {a.reject_reason ?? '(未記入)'}</span>
+              </p>
+            )}
+            {a.status === 'pending' && (
+              <p className="mt-2 text-sm text-orange-700">⌛ モデレーターの確認待ち</p>
+            )}
           </div>
-          <p className="mt-1 text-xs text-gray-500">
-            申請日時: {new Date(a.created_at).toLocaleString('ja-JP')}
-            {' ・ '}カテゴリ: {a.category ?? '(未指定)'}
-            {a.category_is_new ? ' [新規]' : ''}
-          </p>
-          <p className="text-xs text-gray-500">エイリアス: {prettyAliases(a.aliases)}</p>
-          {a.status === 'approved' && a.registered_emoji_name && (
-            <p className="mt-2 text-sm text-green-700">
-              ✅ <code>:{a.registered_emoji_name}:</code> として登録されました
-              {a.decided_by_username && ` (by @${a.decided_by_username})`}
-              {a.decided_at && ` / ${new Date(a.decided_at).toLocaleString('ja-JP')}`}
-            </p>
-          )}
-          {a.status === 'rejected' && (
-            <p className="mt-2 text-sm text-red-700">
-              ❌ 却下されました
-              {a.decided_by_username && ` (by @${a.decided_by_username})`}
-              <br />
-              <span className="text-gray-700">理由: {a.reject_reason ?? '(未記入)'}</span>
-            </p>
-          )}
-          {a.status === 'pending' && (
-            <p className="mt-2 text-sm text-orange-700">⌛ モデレーターの確認待ち</p>
-          )}
         </li>
       ))}
     </ul>
+  );
+}
+
+function Thumbnail({ app }: { app: Application }) {
+  // pending: R2 から私のスコープで取れる
+  if (app.status === 'pending') {
+    return (
+      <a href={`/api/my/applications/${app.id}/image`} target="_blank" rel="noreferrer" className="flex-shrink-0">
+        <img
+          src={`/api/my/applications/${app.id}/image`}
+          alt={`:${app.name}:`}
+          className="h-16 w-16 rounded border border-gray-300 bg-gray-50 object-contain p-1"
+        />
+      </a>
+    );
+  }
+  // approved: 登録済 emoji を Mfm 経由で描画 (emoji-map から URL 解決)
+  if (app.status === 'approved' && app.registered_emoji_name) {
+    return (
+      <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded border border-green-300 bg-green-50 p-1">
+        <span className="text-2xl">
+          <Mfm text={`:${app.registered_emoji_name}:`} />
+        </span>
+      </div>
+    );
+  }
+  // rejected or 画像なし
+  return (
+    <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded border border-gray-200 bg-gray-50 text-[10px] text-gray-400">
+      画像なし
+    </div>
   );
 }
 
