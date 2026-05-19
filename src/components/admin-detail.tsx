@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Mfm } from './mfm';
 
 type Application = {
   id: number;
@@ -40,7 +41,7 @@ export function AdminDetail({ id }: { id: number }) {
   const [aliasesRaw, setAliasesRaw] = useState('');
   const [comment, setComment] = useState('');
 
-  const [busy, setBusy] = useState<null | 'save' | 'approve' | 'reject'>(null);
+  const [busy, setBusy] = useState<null | 'save' | 'approve' | 'reject' | 'delete'>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [actionMsg, setActionMsg] = useState<string | null>(null);
 
@@ -173,7 +174,13 @@ export function AdminDetail({ id }: { id: number }) {
         <div className="flex-1 space-y-1 text-sm">
           <p>
             <strong>申請者:</strong> @{app.applicant_username}
-            {app.applicant_name ? ` (${app.applicant_name})` : ''}
+            {app.applicant_name ? (
+              <>
+                {' ('}
+                <Mfm text={app.applicant_name} />
+                {')'}
+              </>
+            ) : null}
           </p>
           <p>
             <strong>申請日時:</strong> {new Date(app.created_at).toLocaleString('ja-JP')}
@@ -329,9 +336,29 @@ export function AdminDetail({ id }: { id: number }) {
         </p>
       )}
 
-      <a href="/admin" className="inline-block text-sm text-blue-600 underline">
-        ← 一覧に戻る
-      </a>
+      <div className="flex items-center justify-between">
+        <a href="/admin" className="inline-block text-sm text-blue-600 underline">
+          ← 一覧に戻る
+        </a>
+        <button
+          onClick={async () => {
+            if (!confirm(`申請レコード #${id} を完全に削除します (取り消し不可)。よろしいですか?`)) return;
+            setBusy('delete');
+            const r = await fetch(`/api/admin/applications/${id}`, { method: 'DELETE' });
+            const d = (await r.json()) as { ok?: boolean; error?: string };
+            setBusy(null);
+            if (r.ok && d.ok) {
+              window.location.href = '/admin';
+            } else {
+              setActionMsg(`削除失敗: ${d.error ?? r.status}`);
+            }
+          }}
+          disabled={busy !== null}
+          className="text-xs text-gray-500 underline hover:text-red-600 disabled:text-gray-300"
+        >
+          {busy === 'delete' ? '削除中…' : 'この申請レコードを削除'}
+        </button>
+      </div>
     </div>
   );
 }

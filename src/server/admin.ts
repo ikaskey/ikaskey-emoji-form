@@ -256,6 +256,22 @@ export function buildAdminApi() {
     return c.json({ ok: true });
   });
 
+  // ---- 申請レコード削除 (R2 にまだ画像が残っていれば一緒に消す) ----
+  app.delete('/api/admin/applications/:id', async (c) => {
+    const mod = await ensureModerator(c);
+    if (mod instanceof Response) return mod;
+    const id = parseInt(c.req.param('id'), 10);
+    const row = await fetchApplication(c.env, id);
+    if (!row) return c.json({ error: 'not found' }, 404);
+
+    // R2 cleanup (pending なら残っている)
+    if (row.r2_key) {
+      c.executionCtx.waitUntil(c.env.R2.delete(row.r2_key));
+    }
+    await c.env.DB.prepare(`DELETE FROM applications WHERE id = ?`).bind(id).run();
+    return c.json({ ok: true });
+  });
+
   return app;
 }
 

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { handleLogin, handleCallback, handleLogout } from './miauth';
 import { readSession } from './session';
 import { getEmojiCategories } from './categories';
+import { getEmojiMap } from './emoji-map';
 import { handleSubmit } from './submit';
 import { buildAdminApi } from './admin';
 
@@ -36,6 +37,12 @@ export function buildApi() {
   // --- カテゴリ一覧 (KV キャッシュ 30 分) ---
   app.get('/api/categories', async (c) => {
     const data = await getEmojiCategories(c);
+    return c.json(data);
+  });
+
+  // --- 絵文字 name → URL マップ (MFM 描画用、KV キャッシュ 30 分) ---
+  app.get('/api/emoji-map', async (c) => {
+    const data = await getEmojiMap(c);
     return c.json(data);
   });
 

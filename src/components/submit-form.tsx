@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Mfm } from './mfm';
 
 type Me =
   | { loggedIn: true; userId: string; username: string; name: string | null }
@@ -140,8 +141,15 @@ export function SubmitForm() {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <p className="text-sm text-gray-600">
-        ログイン中: <code>@{me.username}</code>{me.name ? ` (${me.name})` : ''} ・
-        <a href="/logout" className="ml-1 underline">ログアウト</a>
+        ログイン中: <code>@{me.username}</code>
+        {me.name ? (
+          <>
+            {' ('}
+            <Mfm text={me.name} />
+            {')'}
+          </>
+        ) : null}{' '}
+        ・<a href="/logout" className="ml-1 underline">ログアウト</a>
       </p>
 
       {/* name */}

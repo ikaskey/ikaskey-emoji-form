@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Mfm } from './mfm';
 
 type Application = {
   id: number;
@@ -102,8 +103,14 @@ export function AdminList() {
               </a>
               <p className="text-sm text-gray-600">
                 <span className="text-gray-500">申請者:</span> @{a.applicant_username}
-                {a.applicant_name ? ` (${a.applicant_name})` : ''} ・{' '}
-                {new Date(a.created_at).toLocaleString('ja-JP')}
+                {a.applicant_name ? (
+                  <>
+                    {' ('}
+                    <Mfm text={a.applicant_name} />
+                    {')'}
+                  </>
+                ) : null}{' '}
+                ・ {new Date(a.created_at).toLocaleString('ja-JP')}
               </p>
               <p className="text-xs text-gray-500">
                 カテゴリ: {a.category ?? '(未指定)'}
