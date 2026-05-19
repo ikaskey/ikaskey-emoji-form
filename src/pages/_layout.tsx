@@ -40,7 +40,9 @@ const getData = async () => {
 };
 
 export const getConfig = async () => {
+  // dynamic にしないと子ページ (render: 'dynamic') の SSR 応答に
+  // layout の CSS link が inject されない (Waku 1.0.0-beta の挙動)
   return {
-    render: 'static',
+    render: 'dynamic',
   } as const;
 };
