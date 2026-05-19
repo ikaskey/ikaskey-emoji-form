@@ -1,0 +1,24 @@
+name: Auto-enable auto-merge (sasagar's PRs)
+
+# sasagar が出した PR は開いた / 同期した瞬間に auto-merge を有効化。
+# branch protection を満たし次第 (status checks 通過 etc.) GitHub 側で
+# squash merge され、merge 後はブランチが自動削除される。
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable-auto-merge:
+    if: github.event.pull_request.user.login == 'sasagar' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge (squash)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
