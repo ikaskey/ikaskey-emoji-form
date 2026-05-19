@@ -9,8 +9,17 @@ export default async function HomePage() {
       <p className="text-gray-700">
         いかすきー (<a href={`https://${host}`} className="underline">{host}</a>) で利用するカスタム絵文字の申請窓口です。
       </p>
-      <p className="text-sm text-gray-500">
-        Phase 1: skeleton — MiAuth / 申請フォーム / モデレーター画面はこれから実装します。
+      <div className="space-x-3">
+        <a
+          href="/submit"
+          className="inline-block rounded bg-blue-600 px-6 py-2 font-medium text-white hover:bg-blue-700"
+        >
+          絵文字を申請する
+        </a>
+        <a href="/api/me" className="text-sm underline text-gray-600">ログイン状態</a>
+      </div>
+      <p className="text-xs text-gray-400">
+        モデレーター画面 (/admin) は Phase 4 で実装します。
       </p>
     </div>
   );

@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { handleLogin, handleCallback, handleLogout } from './miauth';
 import { readSession } from './session';
+import { getEmojiCategories } from './categories';
+import { handleSubmit } from './submit';
 
 /**
  * /api/* と /login, /auth/callback, /logout を扱う Hono アプリ。
@@ -9,11 +11,13 @@ import { readSession } from './session';
 export function buildApi() {
   const app = new Hono<{ Bindings: Env }>();
 
+  // --- 認証フロー ---
   app.get('/login', handleLogin);
   app.get('/auth/callback', handleCallback);
   app.post('/logout', handleLogout);
-  app.get('/logout', handleLogout); // 利便のため GET も許可
+  app.get('/logout', handleLogout);
 
+  // --- ヘルスチェック / セッション参照 ---
   app.get('/api/health', (c) => c.json({ ok: true, ts: Date.now() }));
 
   app.get('/api/me', async (c) => {
@@ -27,6 +31,15 @@ export function buildApi() {
       issuedAt: sess.issuedAt,
     });
   });
+
+  // --- カテゴリ一覧 (KV キャッシュ 30 分) ---
+  app.get('/api/categories', async (c) => {
+    const data = await getEmojiCategories(c);
+    return c.json(data);
+  });
+
+  // --- 申請 ---
+  app.post('/api/submit', handleSubmit);
 
   return app;
 }
