@@ -157,6 +157,7 @@ function Node({ node, emojis }: { node: MfmNode; emojis: EmojiMap }) {
             src={url}
             alt={`:${name}:`}
             title={`:${name}:`}
+            referrerPolicy="no-referrer"
             style={{
               display: 'inline-block',
               height: '1.4em',
