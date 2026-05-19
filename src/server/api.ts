@@ -3,6 +3,7 @@ import { handleLogin, handleCallback, handleLogout } from './miauth';
 import { readSession } from './session';
 import { getEmojiCategories } from './categories';
 import { handleSubmit } from './submit';
+import { buildAdminApi } from './admin';
 
 /**
  * /api/* と /login, /auth/callback, /logout を扱う Hono アプリ。
@@ -40,6 +41,9 @@ export function buildApi() {
 
   // --- 申請 ---
   app.post('/api/submit', handleSubmit);
+
+  // --- モデレーター ---
+  app.route('/', buildAdminApi());
 
   return app;
 }

@@ -19,7 +19,7 @@ export default async function HomePage() {
         <a href="/api/me" className="text-sm underline text-gray-600">ログイン状態</a>
       </div>
       <p className="text-xs text-gray-400">
-        モデレーター画面 (/admin) は Phase 4 で実装します。
+        モデレーターの方は <a href="/admin" className="underline">/admin</a> から申請を確認できます。
       </p>
     </div>
   );
