@@ -100,6 +100,7 @@ export async function handleSubmit(c: Context<{ Bindings: Env }>) {
   const applicationId = insert.meta?.last_row_id;
 
   // 6) Discord 通知 (非同期、失敗しても submit は成功)
+  const adminUrl = `${new URL(c.req.url).origin}/admin/${applicationId ?? ''}`;
   c.executionCtx.waitUntil(
     notifyDiscord(c.env, {
       title: `絵文字申請: :${name}:`,
@@ -108,8 +109,10 @@ export async function handleSubmit(c: Context<{ Bindings: Env }>) {
         `カテゴリ: ${category || '(未指定)'}${categoryIsNew ? ' [新規]' : ''}`,
         `エイリアス: ${aliases.length > 0 ? aliases.join(', ') : '(なし)'}`,
         comment ? `\nコメント: ${comment}` : '',
+        '',
+        `**[→ 承認画面を開く](${adminUrl})**`,
       ].join('\n'),
-      url: `${new URL(c.req.url).origin}/admin/${applicationId ?? ''}`,
+      url: adminUrl,
       color: 0x4ea3ff,
       attachment: {
         filename: `${name}${ext}`,

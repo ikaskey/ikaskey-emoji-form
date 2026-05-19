@@ -197,10 +197,18 @@ export function buildAdminApi() {
 
     // 6) Discord 通知 (画像付き)
     const approveFilename = `${emoji.name}${inferExt(row.mime_type)}`;
+    const approveAdminUrl = `${new URL(c.req.url).origin}/admin/${id}`;
     c.executionCtx.waitUntil(
       notifyDiscord(c.env, {
         title: `採用: :${emoji.name}:`,
-        description: `申請者: @${row.applicant_username}\nカテゴリ: ${row.category ?? '(未指定)'}\n決裁者: @${mod.session.username}`,
+        description: [
+          `申請者: @${row.applicant_username}`,
+          `カテゴリ: ${row.category ?? '(未指定)'}`,
+          `決裁者: @${mod.session.username}`,
+          '',
+          `**[→ 申請詳細を見る](${approveAdminUrl})**`,
+        ].join('\n'),
+        url: approveAdminUrl,
         color: 0x22c55e,
         attachment: {
           filename: approveFilename,
@@ -259,10 +267,18 @@ export function buildAdminApi() {
       }).catch((e) => console.error('reject notify failed:', e)),
     );
 
+    const rejectAdminUrl = `${new URL(c.req.url).origin}/admin/${id}`;
     c.executionCtx.waitUntil(
       notifyDiscord(c.env, {
         title: `却下: :${row.name}:`,
-        description: `申請者: @${row.applicant_username}\n理由: ${reason}\n決裁者: @${mod.session.username}`,
+        description: [
+          `申請者: @${row.applicant_username}`,
+          `理由: ${reason}`,
+          `決裁者: @${mod.session.username}`,
+          '',
+          `**[→ 申請詳細を見る](${rejectAdminUrl})**`,
+        ].join('\n'),
+        url: rejectAdminUrl,
         color: 0xef4444,
         attachment: rejectBlob
           ? { filename: `${row.name}${inferExt(row.mime_type)}`, blob: rejectBlob }
