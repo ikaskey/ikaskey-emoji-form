@@ -183,7 +183,7 @@ export function SubmitForm() {
           | { ok: true; applicationId: number; name: string }
           | { ok: false; errors?: FieldError[]; error?: string };
         if (data.ok) setState({ kind: 'success', applicationId: data.applicationId, name: data.name });
-        else setState({ kind: 'error', errors: data.errors ?? [], general: data.error });
+        else setState({ kind: 'error', errors: data.errors ?? [], ...(data.error ? { general: data.error } : {}) });
       } else {
         // remote
         if (lookupState.kind !== 'found') {
@@ -214,7 +214,7 @@ export function SubmitForm() {
           | { ok: true; applicationId: number; name: string }
           | { ok: false; errors?: FieldError[]; error?: string };
         if (data.ok) setState({ kind: 'success', applicationId: data.applicationId, name: data.name });
-        else setState({ kind: 'error', errors: data.errors ?? [], general: data.error });
+        else setState({ kind: 'error', errors: data.errors ?? [], ...(data.error ? { general: data.error } : {}) });
       }
     } catch (e) {
       setState({ kind: 'error', errors: [], general: String(e) });

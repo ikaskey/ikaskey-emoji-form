@@ -288,7 +288,7 @@ export function buildAdminApi() {
 
 async function approveOne(
   env: Env,
-  ctx: ExecutionContext,
+  ctx: Pick<ExecutionContext, 'waitUntil'>,
   mod: ModeratorInfo,
   id: number,
   origin: string,
@@ -420,7 +420,7 @@ async function approveOne(
 
 async function rejectOne(
   env: Env,
-  ctx: ExecutionContext,
+  ctx: Pick<ExecutionContext, 'waitUntil'>,
   mod: ModeratorInfo,
   id: number,
   reason: string,
@@ -485,7 +485,7 @@ async function rejectOne(
   if (row.r2_key) ctx.waitUntil(env.R2.delete(row.r2_key));
 }
 
-async function deleteOne(env: Env, ctx: ExecutionContext, id: number): Promise<void> {
+async function deleteOne(env: Env, ctx: Pick<ExecutionContext, 'waitUntil'>, id: number): Promise<void> {
   const row = await fetchApplication(env, id);
   if (!row) throw new ActionError('not_found', 404);
   if (row.r2_key) {

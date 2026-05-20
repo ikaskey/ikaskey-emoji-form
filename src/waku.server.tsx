@@ -31,7 +31,7 @@ const API_PATH_PATTERNS = [
 ];
 
 async function combinedFetch(
-  req: Request,
+  req: Request<unknown, IncomingRequestCfProperties>,
   env: Env,
   ctx: ExecutionContext,
 ): Promise<Response> {

@@ -12,10 +12,10 @@ export async function notifyDiscord(
     description: string;
     url?: string;
     /** 直接 URL 指定の embed image (Discord が取れる必要あり) */
-    imageUrl?: string;
+    imageUrl?: string | undefined;
     color?: number;
     /** ローカルにあるバイト列を attachment として送る場合 */
-    attachment?: { filename: string; blob: Blob };
+    attachment?: { filename: string; blob: Blob } | undefined;
   },
 ): Promise<void> {
   if (!env.DISCORD_WEBHOOK_URL) {
