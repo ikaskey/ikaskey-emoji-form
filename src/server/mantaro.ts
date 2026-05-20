@@ -89,6 +89,10 @@ export async function mantaroNotesCreate(
     text: string;
     replyId?: string;
     visibility?: 'public' | 'home' | 'followers' | 'specified';
+    // visibility が 'specified' (ダイレクト) のときは必須。
+    // 指定しないと Misskey 側で visibleUserIds が空となり、
+    // 誰にも (申請者にも) 見えないノートになってしまう。
+    visibleUserIds?: string[];
     localOnly?: boolean;
   },
 ): Promise<{ createdNote: { id: string } }> {

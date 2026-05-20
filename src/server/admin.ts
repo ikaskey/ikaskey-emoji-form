@@ -460,6 +460,8 @@ async function rejectOne(
         reason,
       }),
       visibility: 'specified',
+      // ダイレクトノートは可視ユーザーを明示しないと申請者に届かない
+      visibleUserIds: [row.applicant_id],
       localOnly: true,
     }).catch((e) => console.error('reject notify failed:', e)),
   );
