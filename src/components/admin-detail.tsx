@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Mfm } from './mfm';
 import { StatusStamp } from './status-stamp';
 import { formatDateTime } from '../lib/datetime';
+import { runAction } from '../lib/run-action';
 
 type Application = {
   id: number;
@@ -105,77 +106,113 @@ export function AdminDetail({ id }: { id: number }) {
     setActionKind(kind);
   };
 
-  const save = async () => {
-    setBusy('save');
-    setActionMsg(null);
+  /** 申請レコードを再取得して画面を最新化する (決裁後のステータス反映用)。 */
+  const refresh = async () => {
+    const re = await fetch(`/api/admin/applications/${id}`);
+    if (re.ok) setApp(((await re.json()) as { application: Application }).application);
+  };
+
+  /** フォームの編集内容を保存する API を叩き、成功時は最新レコードを返す。 */
+  const persistForm = async (): Promise<Application> => {
     const r = await fetch(`/api/admin/applications/${id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, category, categoryIsNew, aliasesRaw, comment }),
     });
     const d = (await r.json()) as { application?: Application; error?: string };
-    setBusy(null);
     if (!r.ok || !d.application) {
-      setMsg(`保存失敗: ${d.error ?? r.status}`, 'error');
-      return;
+      throw new Error(`保存失敗: ${d.error ?? r.status}`);
     }
-    setApp(d.application);
-    setMsg('保存しました', 'success');
+    return d.application;
   };
 
+  /** 「編集を保存」ボタン。 */
+  const save = () =>
+    runAction({
+      kind: 'save',
+      setBusy,
+      onError: (m) => setMsg(`保存に失敗しました: ${m}`, 'error'),
+      action: async () => {
+        setActionMsg(null);
+        setApp(await persistForm());
+        setMsg('保存しました', 'success');
+      },
+    });
+
+  /**
+   * 「採用」ボタン。フォーム編集内容を先に保存 (押し忘れ防止) してから
+   * `/approve` を呼び、mantaro への転送・登録・申請者通知をトリガーする。
+   */
   const approve = async () => {
     if (!confirm(`本当に :${name}: を採用しますか?\n\n(mantaro のドライブに転送 → 登録 → 申請者通知が走ります)`)) return;
-    setBusy('approve');
-    setActionMsg(null);
+    await runAction({
+      kind: 'approve',
+      setBusy,
+      onError: (m) => setMsg(`採用処理中に通信エラーが発生しました: ${m}`, 'error'),
+      action: async () => {
+        setActionMsg(null);
+        // 採用前にフォームの編集内容を必ず保存 (押し忘れ防止)
+        setApp(await persistForm());
 
-    // 採用前にフォームの編集内容を必ず保存 (押し忘れ防止)
-    const saveRes = await fetch(`/api/admin/applications/${id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, category, categoryIsNew, aliasesRaw, comment }),
+        const r = await fetch(`/api/admin/applications/${id}/approve`, { method: 'POST' });
+        const d = (await r.json()) as { ok?: boolean; emoji?: { name: string; id: string }; error?: string; detail?: string };
+        if (!r.ok || !d.ok) {
+          setMsg(`採用失敗: ${d.error ?? r.status} ${d.detail ?? ''}`, 'error');
+          return;
+        }
+        setMsg(`採用しました: :${d.emoji?.name}:`, 'success');
+        await refresh();
+      },
     });
-    const saveD = (await saveRes.json()) as { application?: Application; error?: string };
-    if (!saveRes.ok || !saveD.application) {
-      setBusy(null);
-      setMsg(`編集内容の保存に失敗したため採用を中止しました: ${saveD.error ?? saveRes.status}`, 'error');
-      return;
-    }
-    setApp(saveD.application);
-
-    const r = await fetch(`/api/admin/applications/${id}/approve`, { method: 'POST' });
-    const d = (await r.json()) as { ok?: boolean; emoji?: { name: string; id: string }; error?: string; detail?: string };
-    setBusy(null);
-    if (!r.ok || !d.ok) {
-      setMsg(`採用失敗: ${d.error ?? r.status} ${d.detail ?? ''}`, 'error');
-      return;
-    }
-    setMsg(`採用しました: :${d.emoji?.name}:`, 'success');
-    const re = await fetch(`/api/admin/applications/${id}`);
-    if (re.ok) setApp(((await re.json()) as { application: Application }).application);
   };
 
+  /** 「却下する」ボタン。理由必須。申請者へダイレクト通知し R2 画像も削除される。 */
   const reject = async () => {
     if (!rejectReason.trim()) {
       setMsg('却下理由を入力してください', 'error');
       return;
     }
     if (!confirm(`本当に :${name}: を却下しますか?`)) return;
-    setBusy('reject');
-    setActionMsg(null);
-    const r = await fetch(`/api/admin/applications/${id}/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: rejectReason }),
+    await runAction({
+      kind: 'reject',
+      setBusy,
+      onError: (m) => setMsg(`却下処理中に通信エラーが発生しました: ${m}`, 'error'),
+      action: async () => {
+        setActionMsg(null);
+        const r = await fetch(`/api/admin/applications/${id}/reject`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: rejectReason }),
+        });
+        const d = (await r.json()) as { ok?: boolean; error?: string };
+        if (!r.ok || !d.ok) {
+          setMsg(`却下失敗: ${d.error ?? r.status}`, 'error');
+          return;
+        }
+        setMsg('却下しました', 'success');
+        await refresh();
+      },
     });
-    const d = (await r.json()) as { ok?: boolean; error?: string };
-    setBusy(null);
-    if (!r.ok || !d.ok) {
-      setMsg(`却下失敗: ${d.error ?? r.status}`, 'error');
-      return;
-    }
-    setMsg('却下しました', 'success');
-    const re = await fetch(`/api/admin/applications/${id}`);
-    if (re.ok) setApp(((await re.json()) as { application: Application }).application);
+  };
+
+  /** 申請レコードを完全削除する (取り消し不可)。成功時は一覧へ遷移。 */
+  const remove = async () => {
+    if (!confirm(`申請レコード #${id} を完全に削除します (取り消し不可)。よろしいですか?`)) return;
+    await runAction({
+      kind: 'delete',
+      setBusy,
+      onError: (m) => setMsg(`削除処理中に通信エラーが発生しました: ${m}`, 'error'),
+      action: async () => {
+        setActionMsg(null);
+        const r = await fetch(`/api/admin/applications/${id}`, { method: 'DELETE' });
+        const d = (await r.json()) as { ok?: boolean; error?: string };
+        if (r.ok && d.ok) {
+          window.location.href = '/admin';
+          return;
+        }
+        setMsg(`削除失敗: ${d.error ?? r.status}`, 'error');
+      },
+    });
   };
 
   return (
@@ -439,18 +476,7 @@ export function AdminDetail({ id }: { id: number }) {
           ← 一覧に戻る
         </a>
         <button
-          onClick={async () => {
-            if (!confirm(`申請レコード #${id} を完全に削除します (取り消し不可)。よろしいですか?`)) return;
-            setBusy('delete');
-            const r = await fetch(`/api/admin/applications/${id}`, { method: 'DELETE' });
-            const d = (await r.json()) as { ok?: boolean; error?: string };
-            setBusy(null);
-            if (r.ok && d.ok) {
-              window.location.href = '/admin';
-            } else {
-              setMsg(`削除失敗: ${d.error ?? r.status}`, 'error');
-            }
-          }}
+          onClick={remove}
           disabled={busy !== null}
           className="text-xs text-[var(--color-text-faint)] hover:text-[var(--color-rejected)] underline-offset-2 hover:underline disabled:opacity-40"
         >

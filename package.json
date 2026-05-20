@@ -12,7 +12,9 @@
     "start:nobuild": "wrangler dev",
     "migrate:local": "wrangler d1 migrations apply ikaskey-emoji-form --local || wrangler d1 execute ikaskey-emoji-form --local --file=./migrations/0001_init.sql",
     "migrate:remote": "wrangler d1 migrations apply ikaskey-emoji-form --remote || wrangler d1 execute ikaskey-emoji-form --remote --file=./migrations/0001_init.sql",
-    "typegen": "waku router typegen"
+    "typegen": "waku router typegen",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "hono": "^4.12.14",
@@ -34,6 +36,7 @@
     "babel-plugin-react-compiler": "^1.0.0",
     "miniflare": "^4.20260507.1",
     "tailwindcss": "^4.3.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }
