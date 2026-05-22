@@ -68,6 +68,15 @@ export function SubmitForm() {
       .then(([m, cats]) => {
         setMe(m);
         setCategories(cats.categories);
+
+        // 開いた時点の最新カテゴリをバックグラウンドで取り直して差し替える。
+        // (KV キャッシュは最大 30 分古いため)
+        fetch('/api/categories?fresh=1')
+          .then((r) => (r.ok ? (r.json() as Promise<CategoriesResp>) : null))
+          .then((freshCats) => {
+            if (freshCats) setCategories(freshCats.categories);
+          })
+          .catch(() => {});
       })
       .finally(() => setLoading(false));
   }, []);

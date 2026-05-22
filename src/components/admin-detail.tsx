@@ -76,6 +76,15 @@ export function AdminDetail({ id }: { id: number }) {
         setCategoryIsNew(d.application.category_is_new === 1);
         setAliasesRaw(safeAliases(d.application.aliases).join(', '));
         setComment(d.application.comment ?? '');
+
+        // 開いた時点の最新カテゴリをバックグラウンドで取り直して差し替える。
+        // (KV キャッシュは最大 30 分古いため、直前に新設したカテゴリも拾えるように)
+        fetch('/api/categories?fresh=1')
+          .then((r) => (r.ok ? (r.json() as Promise<CategoriesResp>) : null))
+          .then((freshCats) => {
+            if (!cancelled && freshCats) setCategories(freshCats.categories);
+          })
+          .catch(() => {});
       })
       .catch((e) => !cancelled && setError(String(e)))
       .finally(() => !cancelled && setLoading(false));

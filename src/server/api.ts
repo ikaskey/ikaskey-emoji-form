@@ -35,9 +35,10 @@ export function buildApi() {
     });
   });
 
-  // --- カテゴリ一覧 (KV キャッシュ 30 分) ---
+  // --- カテゴリ一覧 (KV キャッシュ 30 分。?fresh=1 でキャッシュ無視の最新取得) ---
   app.get('/api/categories', async (c) => {
-    const data = await getEmojiCategories(c);
+    const fresh = c.req.query('fresh') === '1';
+    const data = await getEmojiCategories(c, { fresh });
     return c.json(data);
   });
 

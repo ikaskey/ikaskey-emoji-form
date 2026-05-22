@@ -10,21 +10,28 @@ type CachedCategories = {
 
 /**
  * ikaskey の公開 API /api/emojis から既存カテゴリ一覧を抽出して KV にキャッシュ。
- * 申請者が選ぶドロップダウンの選択肢になる。
+ * 申請者・モデレーターが選ぶドロップダウンの選択肢になる。
+ *
+ * @param opts.fresh true の場合は KV キャッシュを無視して必ず ikaskey から取り直す。
+ *   モデレーター画面などで「ページを開いた時点の最新カテゴリ」を出したいときに使う
+ *   (取得に成功すれば KV も更新するため、以降の通常取得も最新になる)。
  */
 export async function getEmojiCategories(
   c: Context<{ Bindings: Env }>,
+  opts: { fresh?: boolean } = {},
 ): Promise<CachedCategories> {
-  // 1) KV から取り出し
+  // 1) KV から取り出し (fresh 指定時はキャッシュを使わず取り直す)
   const cached = await c.env.KV.get<CachedCategories>(CACHE_KEY, 'json');
-  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_SECONDS * 1000) {
+  if (!opts.fresh && cached && Date.now() - cached.fetchedAt < CACHE_TTL_SECONDS * 1000) {
     return cached;
   }
 
-  // 2) miss → 公開 API を叩く
-  const r = await fetch(`https://${c.env.MISSKEY_HOST}/api/emojis`);
-  if (!r.ok) {
-    // 失敗したら古いキャッシュを返す (空)
+  // 2) miss / fresh → 公開 API を叩く (ikaskey 無応答でワーカーが固まらないよう timeout)
+  const r = await fetch(`https://${c.env.MISSKEY_HOST}/api/emojis`, {
+    signal: AbortSignal.timeout(6000),
+  }).catch(() => null);
+  if (!r || !r.ok) {
+    // 失敗したら古いキャッシュを返す (無ければ空)
     return cached ?? { categories: [], fetchedAt: 0 };
   }
   const data = (await r.json()) as { emojis: { category: string | null }[] };
