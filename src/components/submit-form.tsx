@@ -68,6 +68,8 @@ export function SubmitForm() {
       .then(([m, cats]) => {
         setMe(m);
         setCategories(cats.categories);
+        // 一覧が取れなかった場合は選択肢が無く行き止まりになるため手入力に切り替える
+        if (cats.categories.length === 0) setIsNewCategory(true);
 
         // 開いた時点の最新カテゴリをバックグラウンドで取り直して差し替える。
         // (KV キャッシュは最大 30 分古いため)
@@ -112,6 +114,11 @@ export function SubmitForm() {
       if (d.exact) {
         setLookupState({ kind: 'found', emoji: d.exact });
         if (!name) setName(d.exact.name);
+        // 元カテゴリがいかすきーにも存在すれば初期値として流用する
+        if (!category && d.exact.category && categories.includes(d.exact.category)) {
+          setIsNewCategory(false);
+          setCategory(d.exact.category);
+        }
       } else {
         setLookupState({ kind: 'notfound', candidates: d.candidates });
       }
@@ -154,7 +161,7 @@ export function SubmitForm() {
         <div className="flex flex-wrap gap-3">
           <button
             onClick={() => {
-              setName(''); setCategory(''); setIsNewCategory(false); setAliases('');
+              setName(''); setCategory(''); setIsNewCategory(categories.length === 0); setAliases('');
               setComment(''); setFile(null);
               setSourceHost(''); setSourceRemoteName(''); setLookupState({ kind: 'idle' });
               setState({ kind: 'idle' });
@@ -233,8 +240,25 @@ export function SubmitForm() {
   const errorFor = (field: string) =>
     state.kind === 'error' ? state.errors.find((e) => e.field === field)?.message : undefined;
 
+  // 単一行 input での Enter は HTML の暗黙送信でフォームが submit されてしまう
+  // (IME 変換確定の Enter も対象になる) ため、送信ボタン以外では抑止する
+  const onFormKeyDown = (ev: React.KeyboardEvent<HTMLFormElement>) => {
+    if (ev.key !== 'Enter') return;
+    const target = ev.target as HTMLElement;
+    if (target instanceof HTMLTextAreaElement) return; // コメント欄の改行はそのまま
+    if (target instanceof HTMLButtonElement) return; // ボタンにフォーカスがある場合は通常動作
+    ev.preventDefault();
+    // IME の変換確定 Enter には反応しない (keyCode 229 は IME 処理中を示すレガシー値。
+    // Safari は確定 Enter の keydown が compositionend 後に来て isComposing が false に
+    // なることがあるため、完全には防げない点に注意)
+    if (ev.nativeEvent.isComposing || ev.keyCode === 229) return;
+    if ((target.id === 'srcHost' || target.id === 'srcName') && lookupState.kind !== 'looking') {
+      lookupRemote();
+    }
+  };
+
   return (
-    <form onSubmit={onSubmit} className="space-y-6">
+    <form onSubmit={onSubmit} onKeyDown={onFormKeyDown} className="space-y-6">
       {/* user strip */}
       <div className="flex items-center justify-between gap-3 text-sm rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] px-3 py-2">
         <div className="flex items-center gap-2 text-[var(--color-text)] min-w-0">
@@ -376,7 +400,9 @@ export function SubmitForm() {
 
       {/* category */}
       <div>
-        <label className="field-label" htmlFor="category">カテゴリ</label>
+        <label className="field-label" htmlFor="category">
+          カテゴリ<span className="required">*</span>
+        </label>
         {isNewCategory ? (
           <input
             id="category"
@@ -384,6 +410,7 @@ export function SubmitForm() {
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             placeholder="新しいカテゴリ名 (例: 700 Text / 711 さ行 / 712 し)"
+            required
             className="input"
           />
         ) : (
@@ -391,9 +418,10 @@ export function SubmitForm() {
             id="category"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
+            required
             className="select"
           >
-            <option value="">(未指定 — モデレーターに任せる)</option>
+            <option value="" disabled>選択してください</option>
             {categories.map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
@@ -404,10 +432,16 @@ export function SubmitForm() {
             type="checkbox"
             checked={isNewCategory}
             onChange={(e) => { setIsNewCategory(e.target.checked); setCategory(''); }}
+            disabled={categories.length === 0}
             className="accent-[var(--color-accent)] w-4 h-4"
           />
           新しいカテゴリ (手入力)
         </label>
+        <p className="field-help">
+          {categories.length === 0
+            ? '既存カテゴリの一覧を取得できなかったため、カテゴリ名を直接入力してください。'
+            : '当てはまるカテゴリが無い場合は「新しいカテゴリ」で入力してください。'}
+        </p>
         {errorFor('category') && <p className="field-error">{errorFor('category')}</p>}
       </div>
 

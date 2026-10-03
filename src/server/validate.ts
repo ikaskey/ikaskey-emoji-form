@@ -44,10 +44,10 @@ export function validateSubmit(input: SubmitInput): ValidationError[] {
     });
   }
 
-  if (input.categoryIsNew && !input.category.trim()) {
+  if (!input.category.trim()) {
     errs.push({
       field: 'category',
-      message: '新カテゴリ名を入力してください',
+      message: input.categoryIsNew ? '新カテゴリ名を入力してください' : 'カテゴリを選択してください',
     });
   }
   if (input.category.length > 200) {
