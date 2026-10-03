@@ -197,8 +197,11 @@ async function handleRemoteSubmit(
   if (!NAME_PATTERN.test(name)) {
     errors.push({ field: 'name', message: '絵文字名は半角英数字とアンダースコアのみ' });
   }
-  if (categoryIsNew && !category) {
-    errors.push({ field: 'category', message: '新カテゴリ名を入力してください' });
+  if (!category) {
+    errors.push({
+      field: 'category',
+      message: categoryIsNew ? '新カテゴリ名を入力してください' : 'カテゴリを選択してください',
+    });
   }
   const aliases = parseAliases(aliasesRaw);
   if (errors.length > 0) {
