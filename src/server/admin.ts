@@ -1,12 +1,14 @@
 import { Hono } from 'hono';
 import { ensureModerator, type ModeratorInfo } from './moderator';
-import { parseAliases, NAME_PATTERN } from './validate';
+import { parseAliases, NAME_PATTERN, ALLOWED_MIME_TYPES, MAX_FILE_SIZE } from './validate';
 import {
   mantaroUploadDriveBlob,
   mantaroEmojiAdd,
   mantaroNotesCreate,
   mantaroEmojiCopy,
   mantaroEmojiUpdate,
+  mantaroListRemote,
+  type RemoteEmoji,
 } from './mantaro';
 import { notifyDiscord } from './discord';
 import {
@@ -324,9 +326,11 @@ async function approveOne(
     // admin/emoji/copy は「元の絵文字名のまま」ローカルに追加する (名前指定不可)。
     // 元の名前がローカルで使用中だと、申請名が空いていても DUPLICATE_NAME で失敗するため、
     // その場合は画像を取得して申請名で admin/emoji/add する経路に切り替える。
-    const srcName = row.source_remote_name ?? row.name;
+    // 申請時に保存した source_remote_name / source_remote_url はクライアント送信値で
+    // source_emoji_id と照合されていないため信用せず、採用時に id から実体を引き直す
+    const src = await resolveRemoteEmoji(env, row);
     const srcNameTaken =
-      srcName !== row.name && (addedNames.has(srcName) || (await emojiNameExists(env, srcName)));
+      src.name !== row.name && (addedNames.has(src.name) || (await emojiNameExists(env, src.name)));
 
     let copiedId: string | null = null;
     if (!srcNameTaken) {
@@ -354,9 +358,9 @@ async function approveOne(
       }
       emoji = { id: copiedId, name: row.name };
     } else {
-      emoji = await addRemoteEmojiByUrl(env, row, aliases);
+      emoji = await addRemoteEmojiByUrl(env, row, src.url, aliases);
     }
-    approveImageUrl = row.source_remote_url ?? undefined;
+    approveImageUrl = src.url;
   } else {
     // ----- 通常のアップロード経路 -----
     const obj = await env.R2.get(row.r2_key);
@@ -540,27 +544,56 @@ function errStatus(e: unknown): 400 | 404 | 409 | 410 | 502 | 500 {
 }
 
 /**
+ * source_emoji_id が指す ikaskey キャッシュ上のリモート絵文字を引き直す。
+ * 名前・画像 URL は申請時の保存値ではなく、ここで得た実体の値を使う。
+ */
+async function resolveRemoteEmoji(env: Env, row: ApplicationRow): Promise<RemoteEmoji> {
+  if (!row.source_host || !row.source_remote_name) {
+    throw new ActionError('missing_source_info', 500);
+  }
+  let list: RemoteEmoji[];
+  try {
+    list = await mantaroListRemote(env, row.source_host, row.source_remote_name, 100);
+  } catch (e) {
+    throw new ActionError(`remote_emoji_lookup_failed: ${e}`, 502);
+  }
+  const found = list.find((e) => e.id === row.source_emoji_id);
+  if (!found) {
+    throw new ActionError(
+      'remote_emoji_not_found: 取り込み元の絵文字が見つからないか、申請内容と一致しません',
+      409,
+    );
+  }
+  return found;
+}
+
+/**
  * 取り込み申請を copy を使わずに登録する。元画像を取得してドライブに上げ、申請名で add する。
  * (copy と違い元のライセンス等は引き継がれない)
  */
 async function addRemoteEmojiByUrl(
   env: Env,
   row: ApplicationRow,
+  imageUrl: string,
   aliases: string[],
 ): Promise<{ id: string; name: string }> {
-  if (!row.source_remote_url) throw new ActionError('missing_source_remote_url', 500);
-
   let blob: Blob;
   try {
-    const r = await fetch(row.source_remote_url, { signal: AbortSignal.timeout(15000) });
+    const r = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) });
     if (!r.ok) throw new Error(`status ${r.status}`);
+    const len = Number(r.headers.get('content-length') ?? 0);
+    if (len > MAX_FILE_SIZE) throw new Error(`too large (${len} bytes)`);
     blob = await r.blob();
   } catch (e) {
     throw new ActionError(`remote_image_fetch_failed: ${e}`, 502);
   }
+  // アップロード経路 (validateSubmit) と同じ形式・サイズ制限を適用
   const mime = (blob.type.split(';')[0] ?? '').trim();
-  if (!mime.startsWith('image/')) {
-    throw new ActionError(`remote_image_fetch_failed: not an image (${mime || 'unknown'})`, 502);
+  if (!ALLOWED_MIME_TYPES.has(mime)) {
+    throw new ActionError(`remote_image_invalid: unsupported type (${mime || 'unknown'})`, 422);
+  }
+  if (blob.size > MAX_FILE_SIZE) {
+    throw new ActionError(`remote_image_invalid: too large (${blob.size} bytes)`, 422);
   }
 
   let driveFile;
