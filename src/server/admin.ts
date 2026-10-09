@@ -321,24 +321,41 @@ async function approveOne(
     if (!row.source_emoji_id) {
       throw new ActionError('missing_source_emoji_id', 500);
     }
-    let copied: { id: string };
-    try {
-      copied = await mantaroEmojiCopy(env, row.source_emoji_id);
-    } catch (e) {
-      throw new ActionError(`emoji_copy_failed: ${e}`, 502);
+    // admin/emoji/copy は「元の絵文字名のまま」ローカルに追加する (名前指定不可)。
+    // 元の名前がローカルで使用中だと、申請名が空いていても DUPLICATE_NAME で失敗するため、
+    // その場合は画像を取得して申請名で admin/emoji/add する経路に切り替える。
+    const srcName = row.source_remote_name ?? row.name;
+    const srcNameTaken =
+      srcName !== row.name && (addedNames.has(srcName) || (await emojiNameExists(env, srcName)));
+
+    let copiedId: string | null = null;
+    if (!srcNameTaken) {
+      try {
+        copiedId = (await mantaroEmojiCopy(env, row.source_emoji_id)).id;
+      } catch (e) {
+        // 名前キャッシュが古く使用中を検知できなかった場合はフォールバックへ
+        if (!String(e).includes('DUPLICATE_NAME')) {
+          throw new ActionError(`emoji_copy_failed: ${e}`, 502);
+        }
+      }
     }
-    // copy 直後の rename + category/aliases 設定
-    try {
-      await mantaroEmojiUpdate(env, {
-        id: copied.id,
-        name: row.name,
-        category: row.category,
-        aliases,
-      });
-    } catch (e) {
-      throw new ActionError(`emoji_update_after_copy_failed: ${e}`, 502);
+
+    if (copiedId) {
+      // copy 直後の rename + category/aliases 設定
+      try {
+        await mantaroEmojiUpdate(env, {
+          id: copiedId,
+          name: row.name,
+          category: row.category,
+          aliases,
+        });
+      } catch (e) {
+        throw new ActionError(`emoji_update_after_copy_failed: ${e}`, 502);
+      }
+      emoji = { id: copiedId, name: row.name };
+    } else {
+      emoji = await addRemoteEmojiByUrl(env, row, aliases);
     }
-    emoji = { id: copied.id, name: row.name };
     approveImageUrl = row.source_remote_url ?? undefined;
   } else {
     // ----- 通常のアップロード経路 -----
@@ -520,6 +537,48 @@ function errStatus(e: unknown): 400 | 404 | 409 | 410 | 502 | 500 {
     if (s === 400 || s === 404 || s === 409 || s === 410 || s === 502) return s;
   }
   return 500;
+}
+
+/**
+ * 取り込み申請を copy を使わずに登録する。元画像を取得してドライブに上げ、申請名で add する。
+ * (copy と違い元のライセンス等は引き継がれない)
+ */
+async function addRemoteEmojiByUrl(
+  env: Env,
+  row: ApplicationRow,
+  aliases: string[],
+): Promise<{ id: string; name: string }> {
+  if (!row.source_remote_url) throw new ActionError('missing_source_remote_url', 500);
+
+  let blob: Blob;
+  try {
+    const r = await fetch(row.source_remote_url, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) throw new Error(`status ${r.status}`);
+    blob = await r.blob();
+  } catch (e) {
+    throw new ActionError(`remote_image_fetch_failed: ${e}`, 502);
+  }
+  const mime = (blob.type.split(';')[0] ?? '').trim();
+  if (!mime.startsWith('image/')) {
+    throw new ActionError(`remote_image_fetch_failed: not an image (${mime || 'unknown'})`, 502);
+  }
+
+  let driveFile;
+  try {
+    driveFile = await mantaroUploadDriveBlob(env, `${row.name}${inferExt(mime)}`, blob);
+  } catch (e) {
+    throw new ActionError(`drive_upload_failed: ${e}`, 502);
+  }
+  try {
+    return await mantaroEmojiAdd(env, {
+      name: row.name,
+      fileId: driveFile.id,
+      category: row.category,
+      aliases,
+    });
+  } catch (e) {
+    throw new ActionError(`emoji_add_failed: ${e}`, 502);
+  }
 }
 
 function inferExt(mime: string): string {
