@@ -322,12 +322,17 @@ export function SubmitForm() {
             </span>
           ) : null}
         </div>
-        <a
-          href="/logout"
+        {/* ログアウトは POST のみ受け付ける (申請フォーム内なので form は入れ子にせず fetch で送る) */}
+        <button
+          type="button"
+          onClick={async () => {
+            await fetch('/logout', { method: 'POST' }).catch(() => {});
+            location.href = '/';
+          }}
           className="shrink-0 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-accent)] underline-offset-2 hover:underline"
         >
           ログアウト
-        </a>
+        </button>
       </div>
 
       {/* mode tabs */}

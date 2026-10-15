@@ -122,3 +122,28 @@ export function parseAliases(raw: string): string[] {
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
+
+/**
+ * 先頭バイトから画像形式を判定する。申告された MIME (ブラウザがファイル名から決める値) は
+ * 偽れるため、中身が本当にその形式かを確かめるのに使う。判定できなければ null。
+ * APNG は PNG と同じ先頭バイトなので 'image/png' を返す。
+ */
+export function sniffImageMime(bytes: Uint8Array): string | null {
+  const at = (i: number) => bytes[i] ?? -1;
+  const ascii = (start: number, s: string) =>
+    [...s].every((ch, i) => at(start + i) === ch.charCodeAt(0));
+  if (at(0) === 0x89 && ascii(1, 'PNG\r\n\x1a\n')) return 'image/png';
+  if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return 'image/jpeg';
+  if (ascii(0, 'GIF87a') || ascii(0, 'GIF89a')) return 'image/gif';
+  if (ascii(0, 'RIFF') && ascii(8, 'WEBP')) return 'image/webp';
+  if (ascii(4, 'ftyp') && (ascii(8, 'avif') || ascii(8, 'avis'))) return 'image/avif';
+  return null;
+}
+
+/** 申告 MIME と中身の形式が一致するか。 */
+export function imageContentMatches(declaredMime: string, bytes: Uint8Array): boolean {
+  const sniffed = sniffImageMime(bytes);
+  if (!sniffed) return false;
+  const declared = declaredMime === 'image/apng' ? 'image/png' : declaredMime;
+  return declared === sniffed;
+}

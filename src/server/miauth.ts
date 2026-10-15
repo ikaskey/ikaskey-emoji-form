@@ -1,5 +1,13 @@
 import type { Context } from 'hono';
-import { writeSession, clearSession, type Session } from './session';
+import { getSignedCookie, setSignedCookie, deleteCookie } from 'hono/cookie';
+import { writeSession, clearSession, readSession, revokeSession, type Session } from './session';
+
+/**
+ * ログインを始めたブラウザに MiAuth の session ID を覚えさせる cookie。
+ * callback で照合し、他人が発行した session ID のリンクを踏ませてその人のアカウントで
+ * ログインさせる攻撃 (ログイン CSRF) を防ぐ。
+ */
+const MIAUTH_STATE_COOKIE = 'iemf_miauth';
 
 /**
  * GET /login
@@ -9,6 +17,14 @@ import { writeSession, clearSession, type Session } from './session';
  */
 export async function handleLogin(c: Context<{ Bindings: Env }>) {
   const session = crypto.randomUUID();
+  await setSignedCookie(c, MIAUTH_STATE_COOKIE, session, c.env.SESSION_SECRET, {
+    path: '/auth/callback',
+    httpOnly: true,
+    secure: true,
+    // Misskey からのリダイレクト (トップレベル GET) で送られるよう Lax
+    sameSite: 'Lax',
+    maxAge: 60 * 10,
+  });
   const origin = new URL(c.req.url).origin;
   const callback = encodeURIComponent(`${origin}/auth/callback?session=${session}`);
   const name = encodeURIComponent(c.env.APP_NAME);
@@ -26,6 +42,11 @@ export async function handleLogin(c: Context<{ Bindings: Env }>) {
 export async function handleCallback(c: Context<{ Bindings: Env }>) {
   const session = c.req.query('session');
   if (!session) return c.text('missing session parameter', 400);
+  const expected = await getSignedCookie(c, c.env.SESSION_SECRET, MIAUTH_STATE_COOKIE);
+  deleteCookie(c, MIAUTH_STATE_COOKIE, { path: '/auth/callback' });
+  if (typeof expected !== 'string' || expected !== session) {
+    return c.text('ログインの有効期限が切れたか、別のブラウザで開始されたログインです。もう一度ログインしてください。', 400);
+  }
 
   const r = await fetch(
     `https://${c.env.MISSKEY_HOST}/api/miauth/${encodeURIComponent(session)}/check`,
@@ -47,6 +68,7 @@ export async function handleCallback(c: Context<{ Bindings: Env }>) {
   }
 
   const sess: Session = {
+    sid: crypto.randomUUID(),
     token: data.token,
     userId: data.user.id,
     username: data.user.username,
@@ -62,6 +84,10 @@ export async function handleCallback(c: Context<{ Bindings: Env }>) {
  *   cookie を消すだけ。Misskey 側 token の revoke はユーザの設定 UI から。
  */
 export async function handleLogout(c: Context<{ Bindings: Env }>) {
+  const sess = await readSession(c);
+  if (sess) {
+    await revokeSession(c, sess).catch((e) => console.error('revoke session failed:', e));
+  }
   clearSession(c);
   return c.redirect('/');
 }

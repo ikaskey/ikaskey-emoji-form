@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { ensureModerator, type ModeratorInfo } from './moderator';
-import { parseAliases, NAME_PATTERN, ALLOWED_MIME_TYPES, MAX_FILE_SIZE } from './validate';
+import { parseAliases, NAME_PATTERN, ALLOWED_MIME_TYPES, MAX_FILE_SIZE, imageContentMatches } from './validate';
 import {
   mantaroUploadDriveBlob,
   mantaroEmojiAdd,
@@ -69,7 +69,7 @@ export function buildAdminApi() {
     if (mod instanceof Response) return mod;
 
     const status = c.req.query('status') ?? 'pending';
-    const limit = Math.min(parseInt(c.req.query('limit') ?? '50', 10) || 50, 200);
+    const limit = Math.min(Math.max(parseInt(c.req.query('limit') ?? '50', 10) || 50, 1), 200);
 
     const rs = await c.env.DB.prepare(
       `SELECT id, applicant_id, applicant_username, applicant_name,
@@ -466,7 +466,7 @@ async function approveOne(
       }),
       visibility: 'home',
       localOnly: true,
-    }).catch((e) => console.error('approve notify failed:', e)),
+    }).catch((e) => reportNotifyFailure(env, '採用', emoji.name, row.applicant_username, adminUrl, e)),
   );
 
   // Discord 通知 (共通)
@@ -540,7 +540,7 @@ async function rejectOne(
       // ダイレクトノートは可視ユーザーを明示しないと申請者に届かない
       visibleUserIds: [row.applicant_id],
       localOnly: true,
-    }).catch((e) => console.error('reject notify failed:', e)),
+    }).catch((e) => reportNotifyFailure(env, '却下', row.name, row.applicant_username, adminUrl, e)),
   );
   ctx.waitUntil(
     notifyDiscord(env, {
@@ -618,6 +618,27 @@ async function releaseClaim(env: Env, id: number, token: string): Promise<void> 
     .bind(id, token)
     .run()
     .catch((e) => console.error(`release claim of application ${id} failed:`, e));
+}
+
+/**
+ * 申請者への通知ノートが投稿できなかったことをモデレーターに知らせる。
+ * (ログだけだと誰も気づかず、申請者に結果が届かないままになるため)
+ */
+async function reportNotifyFailure(
+  env: Env,
+  label: string,
+  emojiName: string,
+  applicantUsername: string,
+  adminUrl: string,
+  e: unknown,
+): Promise<void> {
+  console.error(`${label} notify failed:`, e);
+  await notifyDiscord(env, {
+    title: `⚠ ${label}通知の投稿に失敗: :${emojiName}:`,
+    description: `申請者 @${applicantUsername} への通知ノートを投稿できませんでした。必要なら手動で連絡してください。\n\n**[→ 申請詳細を見る](${adminUrl})**`,
+    url: adminUrl,
+    color: 0xf59e0b,
+  });
 }
 
 function isHttpUrl(s: string): boolean {
@@ -707,6 +728,9 @@ async function addRemoteEmojiByUrl(
   }
   if (blob.size > MAX_FILE_SIZE) {
     throw new ActionError(`remote_image_invalid: too large (${blob.size} bytes)`, 422);
+  }
+  if (!imageContentMatches(mime, new Uint8Array(await blob.slice(0, 16).arrayBuffer()))) {
+    throw new ActionError(`remote_image_invalid: content does not match ${mime}`, 422);
   }
 
   let driveFile;

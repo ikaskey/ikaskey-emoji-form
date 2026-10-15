@@ -32,6 +32,14 @@ export function rejectedNote(args: {
 // Discord webhook の embed 本文
 // =====================================================================
 
+/**
+ * 申請者・モデレーターが入力した文字列を Discord の Markdown として解釈させない。
+ * (コメントに [承認画面](https://evil.example) のような偽リンクを書かれるのを防ぐ)
+ */
+function md(s: string): string {
+  return s.replace(/[\\*_~`|>#\[\]()<:-]/g, '\\$&');
+}
+
 /** 申請受付時 Discord 通知 description */
 export function submittedDiscord(args: {
   applicantUsername: string;
@@ -47,16 +55,16 @@ export function submittedDiscord(args: {
 }): string {
   const lines: string[] = [];
   lines.push(
-    `申請者: @${args.applicantUsername}${args.applicantName ? ` (${args.applicantName})` : ''}`,
+    `申請者: @${md(args.applicantUsername)}${args.applicantName ? ` (${md(args.applicantName)})` : ''}`,
   );
   if (args.source === 'remote_copy') {
     lines.push(
-      `取り込み元: \`:${args.sourceRemoteName ?? '?'}:\` @ ${args.sourceHost ?? '?'}`,
+      `取り込み元: :${md(args.sourceRemoteName ?? '?')}: @ ${md(args.sourceHost ?? '?')}`,
     );
   }
-  lines.push(`カテゴリ: ${args.category || '(未指定)'}${args.categoryIsNew ? ' [新規]' : ''}`);
-  lines.push(`エイリアス: ${args.aliases.length > 0 ? args.aliases.join(', ') : '(なし)'}`);
-  if (args.comment) lines.push(`\nコメント: ${args.comment}`);
+  lines.push(`カテゴリ: ${args.category ? md(args.category) : '(未指定)'}${args.categoryIsNew ? ' [新規]' : ''}`);
+  lines.push(`エイリアス: ${args.aliases.length > 0 ? md(args.aliases.join(', ')) : '(なし)'}`);
+  if (args.comment) lines.push(`\nコメント: ${md(args.comment)}`);
   lines.push('');
   lines.push(`**[→ 承認画面を開く](${args.adminUrl})**`);
   return lines.join('\n');
@@ -70,9 +78,9 @@ export function approvedDiscord(args: {
   adminUrl: string;
 }): string {
   return [
-    `申請者: @${args.applicantUsername}`,
-    `カテゴリ: ${args.category ?? '(未指定)'}`,
-    `決裁者: @${args.decidedByUsername}`,
+    `申請者: @${md(args.applicantUsername)}`,
+    `カテゴリ: ${args.category ? md(args.category) : '(未指定)'}`,
+    `決裁者: @${md(args.decidedByUsername)}`,
     '',
     `**[→ 申請詳細を見る](${args.adminUrl})**`,
   ].join('\n');
@@ -86,9 +94,9 @@ export function rejectedDiscord(args: {
   adminUrl: string;
 }): string {
   return [
-    `申請者: @${args.applicantUsername}`,
-    `理由: ${args.reason}`,
-    `決裁者: @${args.decidedByUsername}`,
+    `申請者: @${md(args.applicantUsername)}`,
+    `理由: ${md(args.reason)}`,
+    `決裁者: @${md(args.decidedByUsername)}`,
     '',
     `**[→ 申請詳細を見る](${args.adminUrl})**`,
   ].join('\n');

@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { csrf } from 'hono/csrf';
 import { handleLogin, handleCallback, handleLogout } from './miauth';
 import { readSession } from './session';
 import { getEmojiCategories } from './categories';
@@ -14,11 +15,24 @@ import { mantaroFindRemote } from './mantaro';
 export function buildApi() {
   const app = new Hono<{ Bindings: Env }>();
 
+  // 他サイトのフォームから cookie 付きで POST させる攻撃 (CSRF) を Origin / Sec-Fetch-Site で弾く。
+  // JSON や DELETE はブラウザがプリフライトを挟むため、他サイトからは送れない。
+  app.use('*', csrf());
+  // 画像などをブラウザに中身から推測させない
+  app.use('*', async (c, next) => {
+    await next();
+    try {
+      c.res.headers.set('X-Content-Type-Options', 'nosniff');
+    } catch {
+      // ヘッダーが不変の Response (fetch の応答をそのまま返す場合など) は付けずに返す
+    }
+  });
+
   // --- 認証フロー ---
   app.get('/login', handleLogin);
   app.get('/auth/callback', handleCallback);
+  // GET を受けるとリンクや画像タグでログアウトさせられるため POST のみ
   app.post('/logout', handleLogout);
-  app.get('/logout', handleLogout);
 
   // --- ヘルスチェック / セッション参照 ---
   app.get('/api/health', (c) => c.json({ ok: true, ts: Date.now() }));
@@ -74,7 +88,7 @@ export function buildApi() {
   app.get('/api/my/applications', async (c) => {
     const sess = await readSession(c);
     if (!sess) return c.json({ error: 'unauthorized' }, 401);
-    const limit = Math.min(parseInt(c.req.query('limit') ?? '50', 10) || 50, 200);
+    const limit = Math.min(Math.max(parseInt(c.req.query('limit') ?? '50', 10) || 50, 1), 200);
     const rs = await c.env.DB.prepare(
       `SELECT id, name, category, category_is_new, aliases, comment, mime_type, file_size,
               status, decided_at, decided_by_username, reject_reason,
