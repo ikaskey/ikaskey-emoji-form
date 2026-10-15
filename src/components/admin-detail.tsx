@@ -65,7 +65,10 @@ export function AdminDetail({ id }: { id: number }) {
         if (!r.ok) throw new Error(`fetch failed: ${r.status}`);
         return r.json() as Promise<{ application: Application }>;
       }),
-      fetch('/api/categories').then((r) => r.json() as Promise<CategoriesResp>),
+      fetch('/api/categories')
+        .then((r) => (r.ok ? (r.json() as Promise<CategoriesResp>) : null))
+        .catch(() => null)
+        .then((c) => c ?? { categories: [], fetchedAt: 0 }),
     ])
       .then(([d, cats]) => {
         if (cancelled) return;
@@ -128,7 +131,7 @@ export function AdminDetail({ id }: { id: number }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, category, categoryIsNew, aliasesRaw, comment }),
     });
-    const d = (await r.json()) as { application?: Application; error?: string; detail?: string };
+    const d = (await r.json().catch(() => ({}))) as { application?: Application; error?: string; detail?: string };
     if (!r.ok || !d.application) {
       throw new Error(`保存失敗: ${d.detail ?? d.error ?? r.status}`);
     }
@@ -164,7 +167,7 @@ export function AdminDetail({ id }: { id: number }) {
         setApp(await persistForm());
 
         const r = await fetch(`/api/admin/applications/${id}/approve`, { method: 'POST' });
-        const d = (await r.json()) as { ok?: boolean; emoji?: { name: string; id: string }; error?: string; detail?: string };
+        const d = (await r.json().catch(() => ({}))) as { ok?: boolean; emoji?: { name: string; id: string }; error?: string; detail?: string };
         if (!r.ok || !d.ok) {
           setMsg(`採用失敗: ${d.error ?? r.status} ${d.detail ?? ''}`, 'error');
           return;
@@ -193,7 +196,7 @@ export function AdminDetail({ id }: { id: number }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ reason: rejectReason }),
         });
-        const d = (await r.json()) as { ok?: boolean; error?: string; detail?: string };
+        const d = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; detail?: string };
         if (!r.ok || !d.ok) {
           setMsg(`却下失敗: ${d.detail ?? d.error ?? r.status}`, 'error');
           return;
@@ -214,7 +217,7 @@ export function AdminDetail({ id }: { id: number }) {
       action: async () => {
         setActionMsg(null);
         const r = await fetch(`/api/admin/applications/${id}`, { method: 'DELETE' });
-        const d = (await r.json()) as { ok?: boolean; error?: string; detail?: string };
+        const d = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; detail?: string };
         if (r.ok && d.ok) {
           window.location.href = '/admin';
           return;

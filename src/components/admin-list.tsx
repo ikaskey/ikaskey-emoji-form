@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Mfm } from './mfm';
 import { StatusStamp } from './status-stamp';
 import { formatDateTime } from '../lib/datetime';
@@ -52,7 +52,11 @@ export function AdminList() {
   const [bulkBusy, setBulkBusy] = useState<null | 'approve' | 'reject' | 'delete'>(null);
   const [bulkMsg, setBulkMsg] = useState<{ kind: 'success' | 'error' | 'info'; text: string } | null>(null);
 
+  // タブを素早く切り替えたとき、遅れて返った前のタブの応答で一覧を上書きしないための連番
+  const loadSeq = useRef(0);
+
   const reload = () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     fetch(`/api/admin/applications?status=${status}`)
@@ -62,20 +66,29 @@ export function AdminList() {
         if (!r.ok) throw new Error(`fetch failed: ${r.status}`);
         return r.json() as Promise<{ applications: Application[] }>;
       })
-      .then((d) => setApps(d.applications))
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
+      .then((d) => {
+        if (seq === loadSeq.current) setApps(d.applications);
+      })
+      .catch((e) => {
+        if (seq === loadSeq.current) setError(String(e));
+      })
+      .finally(() => {
+        if (seq === loadSeq.current) setLoading(false);
+      });
   };
 
   useEffect(() => {
+    setApps([]);
     reload();
     setSelected(new Set());
     setBulkMsg(null);
   }, [status]);
 
   const allVisibleIds = useMemo(() => apps.map((a) => a.id), [apps]);
-  const allSelected = allVisibleIds.length > 0 && allVisibleIds.every((id) => selected.has(id));
   const someSelected = allVisibleIds.some((id) => selected.has(id));
+  // 一度に選べるのは BULK_MAX 件までなので、その上限まで選んでいれば「全選択」とみなす
+  const allSelected =
+    allVisibleIds.length > 0 && selected.size >= Math.min(allVisibleIds.length, BULK_MAX);
 
   const toggleOne = (id: number) => {
     setSelected((prev) => {
@@ -85,8 +98,9 @@ export function AdminList() {
       return next;
     });
   };
+  // 何か選択中なら全解除、未選択なら先頭から BULK_MAX 件を選択
   const toggleAll = () => {
-    if (allSelected) setSelected(new Set());
+    if (someSelected) setSelected(new Set());
     else setSelected(new Set(allVisibleIds.slice(0, BULK_MAX)));
   };
 
@@ -105,7 +119,11 @@ export function AdminList() {
     } else if (action === 'reject') {
       const r = window.prompt(`却下する理由を入力してください (選択中 ${ids.length} 件すべてに同じ理由が設定されます)`, '');
       if (r === null) return; // canceled
-      reason = r.trim() || '(理由未記入)';
+      reason = r.trim();
+      if (!reason) {
+        setBulkMsg({ kind: 'error', text: '却下理由を入力してください' });
+        return;
+      }
       confirmMsg = `選択中 ${ids.length} 件を「${reason}」で却下します。よろしいですか?`;
     } else if (action === 'delete') {
       confirmMsg = `選択中 ${ids.length} 件を完全削除します (取り消し不可)。よろしいですか?`;
@@ -120,9 +138,9 @@ export function AdminList() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids, action, reason }),
       });
-      const d = (await r.json()) as BulkResult | { error: string };
-      if (!r.ok || 'error' in d) {
-        const msg = 'error' in d ? d.error : `失敗 (status=${r.status})`;
+      const d = (await r.json().catch(() => null)) as BulkResult | { error: string } | null;
+      if (!r.ok || !d || 'error' in d) {
+        const msg = d && 'error' in d ? d.error : `失敗 (status=${r.status})`;
         setBulkMsg({ kind: 'error', text: `バルク処理失敗: ${msg}` });
       } else {
         const summary = `${d.succeeded} 件成功${d.failed > 0 ? ` / ${d.failed} 件失敗` : ''}`;
@@ -135,12 +153,13 @@ export function AdminList() {
         } else {
           setBulkMsg({ kind: 'success', text: summary });
         }
-        setSelected(new Set());
-        reload();
       }
     } catch (e) {
       setBulkMsg({ kind: 'error', text: `通信エラー: ${e}` });
     } finally {
+      // 失敗・通信エラーでも一部は処理済みの可能性があるため、常に選択を外して一覧を取り直す
+      setSelected(new Set());
+      reload();
       setBulkBusy(null);
     }
   };
@@ -153,6 +172,7 @@ export function AdminList() {
           <button
             key={t.key}
             role="tab"
+            aria-selected={status === t.key}
             onClick={() => setStatus(t.key)}
             data-active={status === t.key}
             className="tab"
@@ -179,6 +199,7 @@ export function AdminList() {
             }}
             onChange={toggleAll}
             disabled={apps.length === 0}
+            aria-label="全選択 / 全解除"
             className="accent-[var(--color-accent)] w-4 h-4"
           />
           <span className="text-[var(--color-text-muted)]">
@@ -220,6 +241,7 @@ export function AdminList() {
 
       {bulkMsg && (
         <div
+          role={bulkMsg.kind === 'error' ? 'alert' : 'status'}
           className={
             bulkMsg.kind === 'success'
               ? 'alert alert-success'
@@ -275,6 +297,7 @@ export function AdminList() {
                   type="checkbox"
                   checked={isSelected}
                   onChange={() => toggleOne(a.id)}
+                  aria-label={`:${a.name}: を選択`}
                   className="accent-[var(--color-accent)] w-4 h-4"
                 />
               </label>
@@ -283,12 +306,7 @@ export function AdminList() {
                 className="shrink-0 group relative"
                 title={`詳細を開く (#${a.id})`}
               >
-                <img
-                  src={`/api/admin/applications/${a.id}/image`}
-                  alt={a.name}
-                  referrerPolicy="no-referrer"
-                  className="h-16 w-16 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface-2)] object-contain p-1.5 group-hover:border-[var(--color-accent)] transition-colors"
-                />
+                <ListThumb app={a} />
                 {a.source_type === 'remote_copy' && (
                   <span
                     title="他鯖からインポート"
@@ -365,6 +383,34 @@ export function AdminList() {
         })}
       </ul>
     </div>
+  );
+}
+
+/**
+ * 一覧のサムネイル。却下済みのアップロード申請は R2 の画像が消えているので枠だけ出す。
+ * それ以外でも読み込みに失敗したら枠に切り替える。
+ */
+function ListThumb({ app }: { app: Application }) {
+  const [failed, setFailed] = useState(false);
+  const imageGone = app.status === 'rejected' && app.source_type !== 'remote_copy';
+  if (failed || imageGone) {
+    return (
+      <div
+        className="flex h-16 w-16 items-center justify-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface-sunken)] text-xs text-[var(--color-text-faint)]"
+        title="画像は削除済"
+      >
+        {app.status === 'rejected' ? '✕' : '—'}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={`/api/admin/applications/${app.id}/image`}
+      alt={app.name}
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      className="h-16 w-16 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface-2)] object-contain p-1.5 group-hover:border-[var(--color-accent)] transition-colors"
+    />
   );
 }
 

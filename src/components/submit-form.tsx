@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Mfm } from './mfm';
 
 type Me =
@@ -27,8 +27,22 @@ type LookupResult = { exact: RemoteEmoji | null; candidates: RemoteEmoji[] };
 
 type SubmitMode = 'upload' | 'remote';
 
+type SubmitResp =
+  | { ok: true; applicationId: number; name: string }
+  | { ok: false; errors?: FieldError[]; error?: string };
+
+/** 申請 API の応答を読む。障害時に HTML などが返っても JSON パース例外にしない。 */
+async function readSubmitResp(r: Response): Promise<SubmitResp> {
+  const data = (await r.json().catch(() => null)) as SubmitResp | null;
+  if (data && typeof data === 'object' && 'ok' in data) return data;
+  return { ok: false, error: `サーバーエラーが発生しました (status ${r.status})。時間をおいて再度お試しください。` };
+}
+
+const NON_TEXT_INPUT_TYPES = new Set(['file', 'checkbox', 'radio', 'button', 'submit', 'reset', 'image']);
+
 export function SubmitForm() {
   const [me, setMe] = useState<Me | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -56,14 +70,23 @@ export function SubmitForm() {
     | { kind: 'error'; message: string }
   >({ kind: 'idle' });
 
+  // 検索の連番。検索中に host / name が変わったら古い応答を捨てるために使う
+  const lookupSeq = useRef(0);
+
   const [state, setState] = useState<SubmitState>({ kind: 'idle' });
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/me').then((r) =>
-        r.status === 401 ? ({ loggedIn: false } as Me) : (r.json() as Promise<Me>),
-      ),
-      fetch('/api/categories').then((r) => r.json() as Promise<CategoriesResp>),
+      fetch('/api/me').then((r) => {
+        if (r.status === 401) return { loggedIn: false } as Me;
+        if (!r.ok) throw new Error(`ログイン状態を確認できませんでした (status ${r.status})`);
+        return r.json() as Promise<Me>;
+      }),
+      // カテゴリ一覧の失敗は致命的ではないので空扱い (手入力に切り替わる)
+      fetch('/api/categories')
+        .then((r) => (r.ok ? (r.json() as Promise<CategoriesResp>) : null))
+        .catch(() => null)
+        .then((c) => c ?? { categories: [], fetchedAt: 0 }),
     ])
       .then(([m, cats]) => {
         setMe(m);
@@ -80,6 +103,7 @@ export function SubmitForm() {
           })
           .catch(() => {});
       })
+      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, []);
 
@@ -100,17 +124,20 @@ export function SubmitForm() {
       setLookupState({ kind: 'error', message: 'host と name を入力してください' });
       return;
     }
+    const seq = ++lookupSeq.current;
     setLookupState({ kind: 'looking' });
     try {
       const r = await fetch(
         `/api/lookup-remote?host=${encodeURIComponent(h)}&name=${encodeURIComponent(n)}`,
       );
+      if (seq !== lookupSeq.current) return; // 検索中に入力が変わった
       if (!r.ok) {
         const d = (await r.json().catch(() => ({}))) as { error?: string };
         setLookupState({ kind: 'error', message: d.error ?? `lookup failed (${r.status})` });
         return;
       }
       const d = (await r.json()) as LookupResult;
+      if (seq !== lookupSeq.current) return;
       if (d.exact) {
         setLookupState({ kind: 'found', emoji: d.exact });
         if (!name) setName(d.exact.name);
@@ -123,12 +150,39 @@ export function SubmitForm() {
         setLookupState({ kind: 'notfound', candidates: d.candidates });
       }
     } catch (e) {
+      if (seq !== lookupSeq.current) return;
       setLookupState({ kind: 'error', message: String(e) });
     }
   };
 
+  // host / name を変えたら前の検索結果は無効 (そのまま申請すると別の絵文字になる)
+  const onSourceChange = (setter: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setter(e.target.value);
+    lookupSeq.current++;
+    setLookupState({ kind: 'idle' });
+  };
+
+  // モード切替。ファイル入力欄は切替で作り直され空になるため、選択済みファイルも捨てて表示と揃える
+  const switchMode = (m: SubmitMode) => {
+    if (m === mode) return;
+    setMode(m);
+    setFile(null);
+    setState({ kind: 'idle' });
+  };
+
   if (loading) {
     return <p className="text-[var(--color-text-muted)]">読み込み中…</p>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-4 text-center py-6" role="alert">
+        <p className="text-[var(--color-text)]">{loadError}</p>
+        <button type="button" onClick={() => location.reload()} className="btn btn-primary">
+          再読み込み
+        </button>
+      </div>
+    );
   }
 
   if (!me || !me.loggedIn) {
@@ -195,9 +249,7 @@ export function SubmitForm() {
         fd.append('comment', comment);
         fd.append('file', file);
         const r = await fetch('/api/submit', { method: 'POST', body: fd });
-        const data = (await r.json()) as
-          | { ok: true; applicationId: number; name: string }
-          | { ok: false; errors?: FieldError[]; error?: string };
+        const data = await readSubmitResp(r);
         if (data.ok) setState({ kind: 'success', applicationId: data.applicationId, name: data.name });
         else setState({ kind: 'error', errors: data.errors ?? [], ...(data.error ? { general: data.error } : {}) });
       } else {
@@ -226,9 +278,7 @@ export function SubmitForm() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        const data = (await r.json()) as
-          | { ok: true; applicationId: number; name: string }
-          | { ok: false; errors?: FieldError[]; error?: string };
+        const data = await readSubmitResp(r);
         if (data.ok) setState({ kind: 'success', applicationId: data.applicationId, name: data.name });
         else setState({ kind: 'error', errors: data.errors ?? [], ...(data.error ? { general: data.error } : {}) });
       }
@@ -245,8 +295,10 @@ export function SubmitForm() {
   const onFormKeyDown = (ev: React.KeyboardEvent<HTMLFormElement>) => {
     if (ev.key !== 'Enter') return;
     const target = ev.target as HTMLElement;
-    if (target instanceof HTMLTextAreaElement) return; // コメント欄の改行はそのまま
-    if (target instanceof HTMLButtonElement) return; // ボタンにフォーカスがある場合は通常動作
+    // 暗黙送信が起きるのは文字入力系の input だけ。リンク・ボタン・ファイル選択・
+    // チェックボックス・textarea などの Enter は通常動作のままにする
+    if (!(target instanceof HTMLInputElement)) return;
+    if (NON_TEXT_INPUT_TYPES.has(target.type)) return;
     ev.preventDefault();
     // IME の変換確定 Enter には反応しない (keyCode 229 は IME 処理中を示すレガシー値。
     // Safari は確定 Enter の keydown が compositionend 後に来て isComposing が false に
@@ -283,7 +335,8 @@ export function SubmitForm() {
         <button
           type="button"
           role="tab"
-          onClick={() => setMode('upload')}
+          aria-selected={mode === 'upload'}
+          onClick={() => switchMode('upload')}
           data-active={mode === 'upload'}
           className="tab flex-1 sm:flex-none"
         >
@@ -292,7 +345,8 @@ export function SubmitForm() {
         <button
           type="button"
           role="tab"
-          onClick={() => setMode('remote')}
+          aria-selected={mode === 'remote'}
+          onClick={() => switchMode('remote')}
           data-active={mode === 'remote'}
           className="tab flex-1 sm:flex-none"
         >
@@ -310,7 +364,7 @@ export function SubmitForm() {
               <input
                 id="srcHost"
                 value={sourceHost}
-                onChange={(e) => setSourceHost(e.target.value)}
+                onChange={onSourceChange(setSourceHost)}
                 placeholder="例: misskey.io"
                 className="input font-mono"
               />
@@ -322,7 +376,7 @@ export function SubmitForm() {
               <input
                 id="srcName"
                 value={sourceRemoteName}
-                onChange={(e) => setSourceRemoteName(e.target.value)}
+                onChange={onSourceChange(setSourceRemoteName)}
                 placeholder="例: happy_egg"
                 className="input font-mono"
               />
@@ -388,6 +442,7 @@ export function SubmitForm() {
           placeholder={mode === 'upload' ? '例: hanko_sumi' : '空欄可'}
           pattern="[a-zA-Z0-9_]*"
           required={mode === 'upload'}
+          aria-invalid={!!errorFor('name')}
           className="input font-mono"
         />
         <p className="field-help">
@@ -395,7 +450,7 @@ export function SubmitForm() {
           <code className="font-mono text-[var(--color-accent)]">:{name || 'name'}:</code>{' '}
           で参照されます。
         </p>
-        {errorFor('name') && <p className="field-error">{errorFor('name')}</p>}
+        {errorFor('name') && <p className="field-error" role="alert">{errorFor('name')}</p>}
       </div>
 
       {/* category */}
@@ -442,7 +497,7 @@ export function SubmitForm() {
             ? '既存カテゴリの一覧を取得できなかったため、カテゴリ名を直接入力してください。'
             : '当てはまるカテゴリが無い場合は「新しいカテゴリ」で入力してください。'}
         </p>
-        {errorFor('category') && <p className="field-error">{errorFor('category')}</p>}
+        {errorFor('category') && <p className="field-error" role="alert">{errorFor('category')}</p>}
       </div>
 
       {/* aliases */}
@@ -454,10 +509,11 @@ export function SubmitForm() {
           value={aliases}
           onChange={(e) => setAliases(e.target.value)}
           placeholder="例: 済, 完了, はんこ"
+          aria-invalid={!!errorFor('aliases')}
           className="input"
         />
         <p className="field-help">日本語の読みや略称を入れておくと検索しやすくなります。</p>
-        {errorFor('aliases') && <p className="field-error">{errorFor('aliases')}</p>}
+        {errorFor('aliases') && <p className="field-error" role="alert">{errorFor('aliases')}</p>}
       </div>
 
       {mode === 'upload' && (
@@ -483,7 +539,7 @@ export function SubmitForm() {
               </div>
             )}
           </div>
-          {errorFor('file') && <p className="field-error">{errorFor('file')}</p>}
+          {errorFor('file') && <p className="field-error" role="alert">{errorFor('file')}</p>}
         </div>
       )}
 
@@ -495,15 +551,18 @@ export function SubmitForm() {
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           rows={3}
+          maxLength={1000}
           placeholder="申請の意図や用途、出典 (許可済みかなど) を簡潔に。"
+          aria-invalid={!!errorFor('comment')}
           className="textarea"
         />
+        {errorFor('comment') && <p className="field-error" role="alert">{errorFor('comment')}</p>}
       </div>
 
       {state.kind === 'error' && state.general && (
-        <div className="alert alert-error">{state.general}</div>
+        <div className="alert alert-error" role="alert">{state.general}</div>
       )}
-      {errorFor('remote') && <div className="alert alert-error">{errorFor('remote')}</div>}
+      {errorFor('remote') && <div className="alert alert-error" role="alert">{errorFor('remote')}</div>}
 
       <div className="flex items-center gap-3 pt-2">
         <button
