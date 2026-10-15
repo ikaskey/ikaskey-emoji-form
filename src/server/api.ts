@@ -5,7 +5,7 @@ import { getEmojiCategories } from './categories';
 import { getEmojiMap } from './emoji-map';
 import { handleSubmit } from './submit';
 import { buildAdminApi } from './admin';
-import { mantaroListRemote } from './mantaro';
+import { mantaroFindRemote } from './mantaro';
 
 /**
  * /api/* と /login, /auth/callback, /logout を扱う Hono アプリ。
@@ -63,9 +63,8 @@ export function buildApi() {
     if (!/^[a-z0-9.-]+$/.test(host)) return c.json({ error: 'invalid host' }, 400);
     if (!/^[a-zA-Z0-9_+-]+$/.test(name)) return c.json({ error: 'invalid name' }, 400);
     try {
-      const list = await mantaroListRemote(c.env, host, name, 5);
-      const exact = list.find((e) => e.name === name) ?? null;
-      return c.json({ exact, candidates: list });
+      const { found, firstPage } = await mantaroFindRemote(c.env, host, name, (e) => e.name === name);
+      return c.json({ exact: found, candidates: firstPage.slice(0, 5) });
     } catch (e) {
       return c.json({ error: 'lookup failed', detail: String(e) }, 502);
     }

@@ -118,13 +118,47 @@ export async function mantaroListRemote(
   host: string,
   query: string,
   limit = 5,
+  untilId?: string,
 ): Promise<RemoteEmoji[]> {
   const r = await call<RemoteEmoji[]>(env, 'admin/emoji/list-remote', {
     host,
     query,
     limit,
+    ...(untilId ? { untilId } : {}),
   });
   return Array.isArray(r) ? r : [];
+}
+
+/**
+ * list-remote は name の部分一致を id 降順で返すため、よくある名前 (blobcat など) だと
+ * 完全一致の絵文字が先頭ページに入らない。untilId でページを送りながら match を探す。
+ * firstPage は候補表示用。
+ */
+export async function mantaroFindRemote(
+  env: Env,
+  host: string,
+  query: string,
+  match: (e: RemoteEmoji) => boolean,
+  maxPages = 5,
+): Promise<{ found: RemoteEmoji | null; firstPage: RemoteEmoji[] }> {
+  const PAGE = 100;
+  let firstPage: RemoteEmoji[] = [];
+  let untilId: string | undefined;
+  for (let page = 0; page < maxPages; page++) {
+    const list = await mantaroListRemote(env, host, query, PAGE, untilId);
+    if (page === 0) firstPage = list;
+    const found = list.find(match);
+    if (found) return { found, firstPage };
+    const last = list[list.length - 1];
+    if (list.length < PAGE || !last) break;
+    untilId = last.id;
+  }
+  return { found: null, firstPage };
+}
+
+/** ローカル emoji を削除 (採用処理が途中で失敗したときの後始末用)。 */
+export async function mantaroEmojiDelete(env: Env, id: string): Promise<void> {
+  await call(env, 'admin/emoji/delete', { id });
 }
 
 /**

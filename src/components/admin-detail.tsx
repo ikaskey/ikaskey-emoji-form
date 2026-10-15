@@ -128,9 +128,9 @@ export function AdminDetail({ id }: { id: number }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, category, categoryIsNew, aliasesRaw, comment }),
     });
-    const d = (await r.json()) as { application?: Application; error?: string };
+    const d = (await r.json()) as { application?: Application; error?: string; detail?: string };
     if (!r.ok || !d.application) {
-      throw new Error(`保存失敗: ${d.error ?? r.status}`);
+      throw new Error(`保存失敗: ${d.detail ?? d.error ?? r.status}`);
     }
     return d.application;
   };
@@ -193,9 +193,9 @@ export function AdminDetail({ id }: { id: number }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ reason: rejectReason }),
         });
-        const d = (await r.json()) as { ok?: boolean; error?: string };
+        const d = (await r.json()) as { ok?: boolean; error?: string; detail?: string };
         if (!r.ok || !d.ok) {
-          setMsg(`却下失敗: ${d.error ?? r.status}`, 'error');
+          setMsg(`却下失敗: ${d.detail ?? d.error ?? r.status}`, 'error');
           return;
         }
         setMsg('却下しました', 'success');
@@ -214,12 +214,12 @@ export function AdminDetail({ id }: { id: number }) {
       action: async () => {
         setActionMsg(null);
         const r = await fetch(`/api/admin/applications/${id}`, { method: 'DELETE' });
-        const d = (await r.json()) as { ok?: boolean; error?: string };
+        const d = (await r.json()) as { ok?: boolean; error?: string; detail?: string };
         if (r.ok && d.ok) {
           window.location.href = '/admin';
           return;
         }
-        setMsg(`削除失敗: ${d.error ?? r.status}`, 'error');
+        setMsg(`削除失敗: ${d.detail ?? d.error ?? r.status}`, 'error');
       },
     });
   };
@@ -355,7 +355,9 @@ export function AdminDetail({ id }: { id: number }) {
             </div>
 
             <div>
-              <label className="field-label">カテゴリ</label>
+              <label className="field-label">
+                カテゴリ<span className="required">*</span>
+              </label>
               {categoryIsNew ? (
                 <input
                   value={category}
@@ -369,7 +371,11 @@ export function AdminDetail({ id }: { id: number }) {
                   onChange={(e) => setCategory(e.target.value)}
                   className="select"
                 >
-                  <option value="">(未指定)</option>
+                  <option value="" disabled>選択してください</option>
+                  {/* 申請時のカテゴリが現在の一覧に無い場合も、その値を表示・保持する */}
+                  {category && !categories.includes(category) && (
+                    <option value={category}>{category} (一覧に無いカテゴリ)</option>
+                  )}
                   {categories.map((c) => (
                     <option key={c} value={c}>
                       {c}
@@ -382,8 +388,8 @@ export function AdminDetail({ id }: { id: number }) {
                   type="checkbox"
                   checked={categoryIsNew}
                   onChange={(e) => {
+                    // 切り替えても入力済みの値は残す (誤操作でカテゴリが消えて採用されるのを防ぐ)
                     setCategoryIsNew(e.target.checked);
-                    setCategory('');
                   }}
                   className="accent-[var(--color-accent)] w-4 h-4"
                 />
