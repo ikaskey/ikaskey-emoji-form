@@ -16,6 +16,7 @@ async function call<T = unknown>(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...body, i: env.MANTARO_TOKEN }),
+    signal: AbortSignal.timeout(15000),
   });
   if (!r.ok) {
     const text = await r.text();
@@ -52,6 +53,7 @@ export async function mantaroUploadDriveBlob(
   const r = await fetch(`${base(env)}/drive/files/create`, {
     method: 'POST',
     body: fd,
+    signal: AbortSignal.timeout(30000),
   });
   if (!r.ok) {
     throw new Error(`drive/files/create failed: ${r.status} ${await r.text()}`);

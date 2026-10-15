@@ -2,6 +2,8 @@ import type { Context } from 'hono';
 
 const CACHE_KEY = 'emoji_categories_v1';
 const CACHE_TTL_SECONDS = 60 * 30; // 30 min
+// fresh 指定は誰でも呼べるため、直近に取得済みならキャッシュを返して ikaskey への連打を防ぐ
+const FRESH_MIN_INTERVAL_MS = 30 * 1000;
 
 type CachedCategories = {
   categories: string[];        // 既存カテゴリ (重複なし、ソート済)
@@ -22,8 +24,9 @@ export async function getEmojiCategories(
 ): Promise<CachedCategories> {
   // 1) KV から取り出し (fresh 指定時はキャッシュを使わず取り直す)
   const cached = await c.env.KV.get<CachedCategories>(CACHE_KEY, 'json');
-  if (!opts.fresh && cached && Date.now() - cached.fetchedAt < CACHE_TTL_SECONDS * 1000) {
-    return cached;
+  const age = cached ? Date.now() - cached.fetchedAt : Infinity;
+  if (age < (opts.fresh ? FRESH_MIN_INTERVAL_MS : CACHE_TTL_SECONDS * 1000)) {
+    return cached!;
   }
 
   // 2) miss / fresh → 公開 API を叩く (ikaskey 無応答でワーカーが固まらないよう timeout)
@@ -45,6 +48,11 @@ export async function getEmojiCategories(
   };
   await c.env.KV.put(CACHE_KEY, JSON.stringify(fresh), {
     expirationTtl: CACHE_TTL_SECONDS,
-  });
+  }).catch((e) => console.error('categories cache put failed:', e));
   return fresh;
+}
+
+/** 新しいカテゴリの絵文字を採用したあとに呼び、次回の参照で一覧を取り直させる。 */
+export async function invalidateCategories(env: Env): Promise<void> {
+  await env.KV.delete(CACHE_KEY).catch((e) => console.error('categories cache delete failed:', e));
 }

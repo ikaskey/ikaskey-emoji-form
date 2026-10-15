@@ -2,9 +2,9 @@ import type { Context } from 'hono';
 import { readSession } from './session';
 import {
   validateSubmit,
+  validateMeta,
   parseAliases,
   ALLOWED_MIME_TYPES,
-  NAME_PATTERN,
 } from './validate';
 import { notifyDiscord } from './discord';
 import { submittedDiscord } from './messages';
@@ -45,6 +45,11 @@ export async function handleSubmit(c: Context<{ Bindings: Env }>) {
 
   const contentType = c.req.header('content-type') ?? '';
   const isJson = contentType.startsWith('application/json');
+
+  const quotaError = await checkSubmitQuota(c.env, sess.userId);
+  if (quotaError) {
+    return c.json({ ok: false, error: quotaError }, 429);
+  }
 
   if (isJson) {
     return handleRemoteSubmit(c, sess);
@@ -219,18 +224,8 @@ async function handleRemoteSubmit(
   const aliasesRaw = body.aliases ?? '';
   const comment = (body.comment ?? '').trim();
 
-  // 軽量バリデーション
-  const errors: { field: string; message: string }[] = [];
-  if (!NAME_PATTERN.test(name)) {
-    errors.push({ field: 'name', message: '絵文字名は半角英数字とアンダースコアのみ' });
-  }
-  if (!category) {
-    errors.push({
-      field: 'category',
-      message: categoryIsNew ? '新カテゴリ名を入力してください' : 'カテゴリを選択してください',
-    });
-  }
   const aliases = parseAliases(aliasesRaw);
+  const errors = validateMeta({ name, category, categoryIsNew, aliases, comment });
   if (errors.length > 0) {
     return c.json({ ok: false, errors }, 400);
   }
@@ -296,6 +291,30 @@ async function handleRemoteSubmit(
   );
 
   return c.json({ ok: true, applicationId, name });
+}
+
+// 1 人あたりの申請上限 (連投で R2 / Discord / モデレーターの負担が膨らむのを防ぐ)
+const MAX_PENDING_PER_USER = 20;
+const MAX_SUBMITS_PER_HOUR = 10;
+
+/** 上限を超えていればエラーメッセージ、超えていなければ null を返す。 */
+async function checkSubmitQuota(env: Env, userId: string): Promise<string | null> {
+  // created_at は CURRENT_TIMESTAMP (UTC, 'YYYY-MM-DD HH:MM:SS') なので datetime('now') と比較できる
+  const row = await env.DB.prepare(
+    `SELECT
+       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+       SUM(CASE WHEN created_at >= datetime('now', '-1 hour') THEN 1 ELSE 0 END) AS recent
+     FROM applications WHERE applicant_id = ?`,
+  )
+    .bind(userId)
+    .first<{ pending: number | null; recent: number | null }>();
+  if ((row?.pending ?? 0) >= MAX_PENDING_PER_USER) {
+    return `審査待ちの申請が ${MAX_PENDING_PER_USER} 件あります。審査が進んでから申請してください。`;
+  }
+  if ((row?.recent ?? 0) >= MAX_SUBMITS_PER_HOUR) {
+    return `申請は 1 時間に ${MAX_SUBMITS_PER_HOUR} 件までです。しばらく待ってから申請してください。`;
+  }
+  return null;
 }
 
 function inferExtension(mime: string, filename: string): string {

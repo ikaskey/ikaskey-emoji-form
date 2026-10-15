@@ -28,9 +28,12 @@ export async function handleCallback(c: Context<{ Bindings: Env }>) {
   if (!session) return c.text('missing session parameter', 400);
 
   const r = await fetch(
-    `https://${c.env.MISSKEY_HOST}/api/miauth/${session}/check`,
-    { method: 'POST' },
-  );
+    `https://${c.env.MISSKEY_HOST}/api/miauth/${encodeURIComponent(session)}/check`,
+    { method: 'POST', signal: AbortSignal.timeout(10000) },
+  ).catch(() => null);
+  if (!r) {
+    return c.text('MiAuth check failed (upstream unreachable)', 502);
+  }
   if (!r.ok) {
     return c.text(`MiAuth check failed (status=${r.status})`, 502);
   }

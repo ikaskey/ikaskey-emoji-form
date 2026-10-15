@@ -47,12 +47,17 @@ export async function notifyDiscord(
       const fd = new FormData();
       fd.append('payload_json', JSON.stringify({ embeds: [embed] }));
       fd.append('files[0]', payload.attachment.blob, safeFilename);
-      r = await fetch(env.DISCORD_WEBHOOK_URL, { method: 'POST', body: fd });
+      r = await fetch(env.DISCORD_WEBHOOK_URL, {
+        method: 'POST',
+        body: fd,
+        signal: AbortSignal.timeout(15000),
+      });
     } else {
       r = await fetch(env.DISCORD_WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ embeds: [embed] }),
+        signal: AbortSignal.timeout(15000),
       });
     }
     if (!r.ok) {

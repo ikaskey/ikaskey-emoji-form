@@ -23,7 +23,11 @@ export async function ensureModerator(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ i: sess.token }),
-  });
+    signal: AbortSignal.timeout(10000),
+  }).catch(() => null);
+  if (!r) {
+    return c.json({ error: 'auth check failed', upstream: 'unreachable' }, 502);
+  }
   if (!r.ok) {
     return c.json({ error: 'auth check failed', upstream: r.status }, 502);
   }

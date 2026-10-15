@@ -12,13 +12,14 @@ import {
   type RemoteEmoji,
 } from './mantaro';
 import { notifyDiscord } from './discord';
+import { invalidateCategories } from './categories';
 import {
   approvedNote,
   rejectedNote,
   approvedDiscord,
   rejectedDiscord,
 } from './messages';
-import { emojiNameExists } from './emoji-map';
+import { emojiNameExists, getEmojiMap, invalidateEmojiMap } from './emoji-map';
 
 export type ApplicationRow = {
   id: number;
@@ -159,13 +160,11 @@ export function buildAdminApi() {
     const results: { id: number; ok: boolean; error?: string; emojiName?: string }[] = [];
 
     // 直列実行 (mantaro / D1 への並列ヒットを避け、ログを読みやすくする)
-    // バルク内で連続採用した name は本体側 cache 反映前に衝突するので Set で追跡。
-    const addedNames = new Set<string>();
+    const names = createNameRegistry(c.env);
     for (const id of ids) {
       try {
         if (action === 'approve') {
-          const r = await approveOne(c.env, c.executionCtx, mod, id, origin, addedNames);
-          addedNames.add(r.emoji.name);
+          const r = await approveOne(c.env, c.executionCtx, mod, id, origin, names);
           results.push({ id, ok: true, emojiName: r.emoji.name });
         } else if (action === 'reject') {
           await rejectOne(c.env, c.executionCtx, mod, id, reason, origin);
@@ -267,7 +266,7 @@ export function buildAdminApi() {
     const id = parseInt(c.req.param('id'), 10);
     const origin = new URL(c.req.url).origin;
     try {
-      const result = await approveOne(c.env, c.executionCtx, mod, id, origin, new Set());
+      const result = await approveOne(c.env, c.executionCtx, mod, id, origin, createNameRegistry(c.env));
       return c.json({ ok: true, emoji: result.emoji });
     } catch (e) {
       return c.json({ error: errCode(e), detail: errDetail(e) }, errStatus(e));
@@ -316,8 +315,7 @@ async function approveOne(
   mod: ModeratorInfo,
   id: number,
   origin: string,
-  /** 同バルク内ですでに採用した name 集合 (本体 cache 反映前の重複検知) */
-  addedNames: Set<string>,
+  names: NameRegistry,
 ): Promise<{ emoji: { id: string; name: string } }> {
   const { row, token } = await claimApplication(env, id, mod);
 
@@ -336,8 +334,8 @@ async function approveOne(
       throw new ActionError('category_required: カテゴリが未設定です。編集してから採用してください', 409);
     }
 
-    // 同名チェック (本体 cache + 同バルク内追加分)
-    if (addedNames.has(row.name) || (await emojiNameExists(env, row.name))) {
+    // 同名チェック (本体の最新一覧 + 同リクエスト内で追加した分)
+    if (await names.has(row.name)) {
       throw new ActionError(
         `name_already_exists: 絵文字名 :${row.name}: はすでに存在します。申請の名前を変更してから再採用してください。`,
         409,
@@ -355,7 +353,7 @@ async function approveOne(
       // 名前・URL は保存値を信用せず、採用時に id から実体を引き直す
       const src = await resolveRemoteEmoji(env, row);
       const srcNameTaken =
-        src.name !== row.name && (addedNames.has(src.name) || (await emojiNameExists(env, src.name)));
+        src.name !== row.name && (await names.has(src.name));
 
       let copiedId: string | null = null;
       if (!srcNameTaken) {
@@ -412,7 +410,7 @@ async function approveOne(
           aliases,
         });
       } catch (e) {
-        throw new ActionError(`emoji_add_failed: ${e}`, 502);
+        throw emojiAddError(e, row.name);
       }
 
       approveAttachment = {
@@ -427,6 +425,9 @@ async function approveOne(
 
   // ここから先は Misskey に絵文字が登録済み。失敗しても印は外さない (外すと再採用で二重登録になる)。
   // 印は CLAIM_TTL_MS 経過後に失効する。
+  names.add(emoji.name);
+  ctx.waitUntil(invalidateEmojiMap(env));
+  if (row.category_is_new) ctx.waitUntil(invalidateCategories(env));
   const now = new Date().toISOString();
   let changes = 0;
   try {
@@ -722,8 +723,49 @@ async function addRemoteEmojiByUrl(
       aliases,
     });
   } catch (e) {
-    throw new ActionError(`emoji_add_failed: ${e}`, 502);
+    throw emojiAddError(e, row.name);
   }
+}
+
+/** admin/emoji/add の失敗を ActionError に変換する。名前の重複は 409 で返す。 */
+function emojiAddError(e: unknown, name: string): ActionError {
+  if (String(e).includes('DUPLICATE_NAME')) {
+    return new ActionError(
+      `name_already_exists: 絵文字名 :${name}: はすでに存在します。申請の名前を変更してから再採用してください。`,
+      409,
+    );
+  }
+  return new ActionError(`emoji_add_failed: ${e}`, 502);
+}
+
+type NameRegistry = {
+  has(name: string): Promise<boolean>;
+  add(name: string): void;
+};
+
+/**
+ * 採用時の名前重複チェック。本体の最新一覧は 1 リクエストにつき最初の 1 回だけ取得し、
+ * 同リクエスト内で採用した名前を足していく (バルク採用で一覧を何度も取り直さないため)。
+ * 一覧が取れないときは重複を確認できないので、採用させずに 502 にする。
+ */
+function createNameRegistry(env: Env): NameRegistry {
+  let names: Promise<Set<string>> | null = null;
+  const added = new Set<string>();
+  return {
+    async has(name) {
+      if (added.has(name)) return true;
+      names ??= getEmojiMap(env, { fresh: true, strict: true })
+        .then((m) => new Set(Object.keys(m.map)))
+        .catch((e) => {
+          names = null;
+          throw new ActionError(`emoji_list_unavailable: 絵文字一覧を取得できませんでした: ${e}`, 502);
+        });
+      return (await names).has(name);
+    },
+    add(name) {
+      added.add(name);
+    },
+  };
 }
 
 function inferExt(mime: string): string {
