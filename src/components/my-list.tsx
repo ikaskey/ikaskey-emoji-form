@@ -31,14 +31,18 @@ export function MyList() {
   const [me, setMe] = useState<Me | null>(null);
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/me').then((r) =>
-        r.status === 401 ? ({ loggedIn: false } as Me) : (r.json() as Promise<Me>),
-      ),
+      fetch('/api/me').then((r) => {
+        if (r.status === 401) return { loggedIn: false } as Me;
+        if (!r.ok) throw new Error(`ログイン状態を確認できませんでした (status ${r.status})`);
+        return r.json() as Promise<Me>;
+      }),
       fetch('/api/my/applications').then(async (r) => {
         if (r.status === 401) return { applications: [] };
+        if (!r.ok) throw new Error(`申請一覧を取得できませんでした (status ${r.status})`);
         return r.json() as Promise<{ applications: Application[] }>;
       }),
     ])
@@ -46,10 +50,22 @@ export function MyList() {
         setMe(m);
         setApps(d.applications);
       })
+      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <p className="text-[var(--color-text-muted)]">読み込み中…</p>;
+
+  if (loadError) {
+    return (
+      <div className="card p-6 text-center space-y-4" role="alert">
+        <p className="text-[var(--color-text)]">{loadError}</p>
+        <button type="button" onClick={() => location.reload()} className="btn btn-primary">
+          再読み込み
+        </button>
+      </div>
+    );
+  }
 
   if (!me || !me.loggedIn) {
     return (
