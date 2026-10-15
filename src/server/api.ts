@@ -93,12 +93,26 @@ export function buildApi() {
     const id = parseInt(c.req.param('id'), 10);
     if (!Number.isFinite(id)) return c.text('bad id', 400);
     const row = await c.env.DB.prepare(
-      `SELECT applicant_id, r2_key, mime_type FROM applications WHERE id = ?`,
+      `SELECT applicant_id, r2_key, mime_type, source_type, source_remote_url
+       FROM applications WHERE id = ?`,
     )
       .bind(id)
-      .first<{ applicant_id: string; r2_key: string; mime_type: string }>();
+      .first<{
+        applicant_id: string;
+        r2_key: string;
+        mime_type: string;
+        source_type: string | null;
+        source_remote_url: string | null;
+      }>();
     if (!row) return c.text('not found', 404);
     if (row.applicant_id !== sess.userId) return c.text('forbidden', 403);
+    // 取り込み申請は R2 に画像を持たないので、取り込み元の画像へ転送する
+    if (row.source_type === 'remote_copy') {
+      if (row.source_remote_url && /^https?:\/\//i.test(row.source_remote_url)) {
+        return c.redirect(row.source_remote_url, 302);
+      }
+      return c.text('no image', 404);
+    }
     if (!row.r2_key) return c.text('no image', 404);
     const obj = await c.env.R2.get(row.r2_key);
     if (!obj) return c.text('image already deleted', 410);

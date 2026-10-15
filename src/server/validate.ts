@@ -4,6 +4,10 @@
 
 export const NAME_PATTERN = /^[a-zA-Z0-9_]+$/;
 export const NAME_MAX_LENGTH = 60;
+export const CATEGORY_MAX_LENGTH = 200;
+export const ALIAS_MAX_LENGTH = 60;
+export const ALIASES_MAX_COUNT = 20;
+export const COMMENT_MAX_LENGTH = 1000;
 
 export const ALLOWED_MIME_TYPES = new Set([
   'image/png',
@@ -16,18 +20,20 @@ export const ALLOWED_MIME_TYPES = new Set([
 
 export const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MiB (Misskey デフォルト相当)
 
-export type SubmitInput = {
+export type MetaInput = {
   name: string;
   category: string;
   categoryIsNew: boolean;
   aliases: string[];
   comment: string;
-  file: File;
 };
+
+export type SubmitInput = MetaInput & { file: File };
 
 export type ValidationError = { field: string; message: string };
 
-export function validateSubmit(input: SubmitInput): ValidationError[] {
+/** 名前・カテゴリ・エイリアス・コメントの検証。アップロード・取り込みの両経路で使う。 */
+export function validateMeta(input: MetaInput): ValidationError[] {
   const errs: ValidationError[] = [];
 
   if (!input.name) {
@@ -50,12 +56,18 @@ export function validateSubmit(input: SubmitInput): ValidationError[] {
       message: input.categoryIsNew ? '新カテゴリ名を入力してください' : 'カテゴリを選択してください',
     });
   }
-  if (input.category.length > 200) {
+  if (input.category.length > CATEGORY_MAX_LENGTH) {
     errs.push({ field: 'category', message: 'カテゴリ名が長すぎます' });
   }
 
+  if (input.aliases.length > ALIASES_MAX_COUNT) {
+    errs.push({
+      field: 'aliases',
+      message: `エイリアスは ${ALIASES_MAX_COUNT} 個までにしてください`,
+    });
+  }
   for (const a of input.aliases) {
-    if (a.length > 60) {
+    if (a.length > ALIAS_MAX_LENGTH) {
       errs.push({
         field: 'aliases',
         message: `エイリアスが長すぎます: "${a.slice(0, 20)}…"`,
@@ -63,6 +75,19 @@ export function validateSubmit(input: SubmitInput): ValidationError[] {
       break;
     }
   }
+
+  if (input.comment.length > COMMENT_MAX_LENGTH) {
+    errs.push({
+      field: 'comment',
+      message: `コメントは ${COMMENT_MAX_LENGTH} 文字以内にしてください`,
+    });
+  }
+
+  return errs;
+}
+
+export function validateSubmit(input: SubmitInput): ValidationError[] {
+  const errs = validateMeta(input);
 
   if (!input.file) {
     errs.push({ field: 'file', message: '画像ファイルを選択してください' });
