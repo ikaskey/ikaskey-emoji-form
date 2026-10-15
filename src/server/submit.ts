@@ -3,6 +3,7 @@ import { readSession } from './session';
 import {
   validateSubmit,
   validateMeta,
+  imageContentMatches,
   parseAliases,
   ALLOWED_MIME_TYPES,
 } from './validate';
@@ -106,6 +107,12 @@ async function handleUploadSubmit(
 
   // R2 に保存 (バイト列を一度だけ読んで再利用)
   const buf = await file.arrayBuffer();
+  if (!imageContentMatches(file.type, new Uint8Array(buf, 0, Math.min(buf.byteLength, 16)))) {
+    return c.json(
+      { ok: false, errors: [{ field: 'file', message: 'ファイルの中身が画像形式と一致しません' }] },
+      400,
+    );
+  }
   const ext = inferExtension(file.type, file.name);
   const r2Key = `pending/${sess.userId}/${Date.now()}-${crypto.randomUUID()}${ext}`;
   await c.env.R2.put(r2Key, buf, {
@@ -117,21 +124,28 @@ async function handleUploadSubmit(
     },
   });
 
-  const insert = await c.env.DB.prepare(
-    `INSERT INTO applications (
-      applicant_id, applicant_username, applicant_name,
-      name, category, category_is_new, aliases, comment,
-      r2_key, mime_type, file_size, original_filename,
-      source_type
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'upload')`,
-  )
-    .bind(
-      sess.userId, sess.username, sess.name,
-      name, category || null, categoryIsNew ? 1 : 0,
-      JSON.stringify(aliases), comment || null,
-      r2Key, file.type, file.size, file.name,
+  let insert: D1Result;
+  try {
+    insert = await c.env.DB.prepare(
+      `INSERT INTO applications (
+        applicant_id, applicant_username, applicant_name,
+        name, category, category_is_new, aliases, comment,
+        r2_key, mime_type, file_size, original_filename,
+        source_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'upload')`,
     )
-    .run();
+      .bind(
+        sess.userId, sess.username, sess.name,
+        name, category || null, categoryIsNew ? 1 : 0,
+        JSON.stringify(aliases), comment || null,
+        r2Key, file.type, file.size, file.name,
+      )
+      .run();
+  } catch (e) {
+    // 申請レコードが作れなかった画像は誰からも参照されないので消しておく
+    c.executionCtx.waitUntil(c.env.R2.delete(r2Key));
+    throw e;
+  }
 
   const applicationId = insert.meta?.last_row_id;
   const adminUrl = `${new URL(c.req.url).origin}/admin/${applicationId ?? ''}`;
@@ -317,9 +331,8 @@ async function checkSubmitQuota(env: Env, userId: string): Promise<string | null
   return null;
 }
 
+/** 拡張子は検証済みの MIME から決め、未知の場合だけファイル名から取る。 */
 function inferExtension(mime: string, filename: string): string {
-  const fromName = filename.match(/\.[a-zA-Z0-9]+$/)?.[0];
-  if (fromName) return fromName.toLowerCase();
   const map: Record<string, string> = {
     'image/png': '.png',
     'image/jpeg': '.jpg',
@@ -328,7 +341,7 @@ function inferExtension(mime: string, filename: string): string {
     'image/apng': '.apng',
     'image/avif': '.avif',
   };
-  return map[mime] ?? '';
+  return map[mime] ?? filename.match(/\.[a-zA-Z0-9]+$/)?.[0]?.toLowerCase() ?? '';
 }
 
 export { ALLOWED_MIME_TYPES };

@@ -45,7 +45,7 @@ export async function notifyDiscord(
     let r: Response;
     if (payload.attachment && safeFilename) {
       const fd = new FormData();
-      fd.append('payload_json', JSON.stringify({ embeds: [embed] }));
+      fd.append('payload_json', JSON.stringify({ embeds: [embed], allowed_mentions: { parse: [] } }));
       fd.append('files[0]', payload.attachment.blob, safeFilename);
       r = await fetch(env.DISCORD_WEBHOOK_URL, {
         method: 'POST',
@@ -56,7 +56,7 @@ export async function notifyDiscord(
       r = await fetch(env.DISCORD_WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ embeds: [embed] }),
+        body: JSON.stringify({ embeds: [embed], allowed_mentions: { parse: [] } }),
         signal: AbortSignal.timeout(15000),
       });
     }
