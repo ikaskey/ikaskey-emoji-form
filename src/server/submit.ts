@@ -9,6 +9,7 @@ import {
 import { notifyDiscord } from './discord';
 import { submittedDiscord } from './messages';
 import { emojiNameExists } from './emoji-map';
+import { mantaroFindRemote, type RemoteEmoji } from './mantaro';
 
 /**
  * POST /api/submit
@@ -34,7 +35,7 @@ import { emojiNameExists } from './emoji-map';
  *   sourceEmojiId    string   ← /api/lookup-remote が返した exact.id を必須
  *   sourceHost       string
  *   sourceRemoteName string
- *   sourceRemoteUrl  string   ← preview 用、storage はしないが Discord 通知に使用
+ *   sourceRemoteUrl  string   ← 互換のため受け取るが使わない (保存・通知には実体の URL を使う)
  */
 export async function handleSubmit(c: Context<{ Bindings: Env }>) {
   const sess = await readSession(c);
@@ -177,7 +178,6 @@ async function handleRemoteSubmit(
   const sourceEmojiId = (body.sourceEmojiId ?? '').trim();
   const sourceHost = (body.sourceHost ?? '').trim().toLowerCase();
   const sourceRemoteName = (body.sourceRemoteName ?? '').trim();
-  const sourceRemoteUrl = (body.sourceRemoteUrl ?? '').trim();
 
   if (!sourceEmojiId || !sourceHost || !sourceRemoteName) {
     return c.json({ ok: false, error: 'source_emoji_id / host / remote_name required' }, 400);
@@ -185,6 +185,33 @@ async function handleRemoteSubmit(
   if (!/^[a-z0-9.-]+$/.test(sourceHost)) {
     return c.json({ ok: false, error: 'invalid host' }, 400);
   }
+
+  // id / host / name の組み合わせが ikaskey キャッシュ上の実体と一致するか確認し、
+  // 画像 URL はクライアント送信値 (sourceRemoteUrl) ではなく実体の値を保存する。
+  // (送信値を信用するとプレビューだけ無害な画像に偽装してモデレーターを欺ける)
+  let src: RemoteEmoji | null;
+  try {
+    src = (
+      await mantaroFindRemote(
+        c.env,
+        sourceHost,
+        sourceRemoteName,
+        (e) => e.id === sourceEmojiId && e.name === sourceRemoteName,
+      )
+    ).found;
+  } catch (e) {
+    return c.json({ ok: false, error: `remote lookup failed: ${e}` }, 502);
+  }
+  if (!src) {
+    return c.json(
+      {
+        ok: false,
+        errors: [{ field: 'remote', message: '取り込み元の絵文字が見つかりません。もう一度検索してください' }],
+      },
+      400,
+    );
+  }
+  const sourceRemoteUrl = src.url;
 
   const name = ((body.name ?? '').trim() || sourceRemoteName).trim();
   const category = (body.category ?? '').trim();
@@ -264,7 +291,7 @@ async function handleRemoteSubmit(
       }),
       url: adminUrl,
       color: 0x9b59b6,
-      imageUrl: sourceRemoteUrl || undefined,
+      imageUrl: sourceRemoteUrl,
     }),
   );
 
