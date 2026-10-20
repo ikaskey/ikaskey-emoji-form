@@ -15,6 +15,10 @@ describe('safeReturnTo', () => {
     expect(safeReturnTo('//evil.example/x', O)).toBe('/');
     expect(safeReturnTo('/\\evil.example', O)).toBe('/');
     expect(safeReturnTo('javascript:alert(1)', O)).toBe('/');
+    // 解析後に // で始まるパスになる入力 (プロトコル相対 URL として外部に飛ばされる)
+    expect(safeReturnTo('/.//evil.example', O)).toBe('/evil.example');
+    expect(safeReturnTo(`${O}//evil.example`, O)).toBe('/evil.example');
+    expect(safeReturnTo('/%2F/evil.example', O)).toBe('/%2F/evil.example');
   });
 
   it('認証まわりのパスと空値は / にする', () => {

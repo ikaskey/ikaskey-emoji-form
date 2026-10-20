@@ -26,7 +26,10 @@ export function safeReturnTo(raw: string | null | undefined, origin: string): st
   if (u.origin !== origin) return '/';
   // 認証まわりのパスに戻るとループや再ログアウトになる
   if (/^\/(login|logout|auth\/)/.test(u.pathname)) return '/';
-  return `${u.pathname}${u.search}${u.hash}`;
+  // 解析後のパスが // で始まると (例: '/.//evil.example')、Location ヘッダーでは
+  // プロトコル相対 URL として外部サイト扱いになるため、先頭のスラッシュを 1 つにまとめる
+  const path = `/${u.pathname.replace(/^[/\\]+/, '')}`;
+  return `${path}${u.search}${u.hash}`;
 }
 
 /**
