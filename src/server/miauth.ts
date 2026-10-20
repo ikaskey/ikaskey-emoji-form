@@ -9,6 +9,26 @@ import { writeSession, clearSession, readSession, revokeSession, type Session } 
  */
 const MIAUTH_STATE_COOKIE = 'iemf_miauth';
 
+type MiAuthState = { session: string; returnTo: string };
+
+/**
+ * ログイン後に戻る先を、同じオリジン内のパスに限って取り出す。
+ * 外部 URL を許すと、ログイン後に偽サイトへ飛ばすオープンリダイレクトになるため。
+ */
+export function safeReturnTo(raw: string | null | undefined, origin: string): string {
+  if (!raw) return '/';
+  let u: URL;
+  try {
+    u = new URL(raw, origin);
+  } catch {
+    return '/';
+  }
+  if (u.origin !== origin) return '/';
+  // 認証まわりのパスに戻るとループや再ログアウトになる
+  if (/^\/(login|logout|auth\/)/.test(u.pathname)) return '/';
+  return `${u.pathname}${u.search}${u.hash}`;
+}
+
 /**
  * GET /login
  *   1. session UUID を発行
@@ -17,7 +37,11 @@ const MIAUTH_STATE_COOKIE = 'iemf_miauth';
  */
 export async function handleLogin(c: Context<{ Bindings: Env }>) {
   const session = crypto.randomUUID();
-  await setSignedCookie(c, MIAUTH_STATE_COOKIE, session, c.env.SESSION_SECRET, {
+  const origin = new URL(c.req.url).origin;
+  // 戻り先は ?returnTo= を優先し、無ければログインリンクを押したページ (Referer)
+  const returnTo = safeReturnTo(c.req.query('returnTo') ?? c.req.header('referer'), origin);
+  const state: MiAuthState = { session, returnTo };
+  await setSignedCookie(c, MIAUTH_STATE_COOKIE, JSON.stringify(state), c.env.SESSION_SECRET, {
     path: '/auth/callback',
     httpOnly: true,
     secure: true,
@@ -25,7 +49,6 @@ export async function handleLogin(c: Context<{ Bindings: Env }>) {
     sameSite: 'Lax',
     maxAge: 60 * 10,
   });
-  const origin = new URL(c.req.url).origin;
   const callback = encodeURIComponent(`${origin}/auth/callback?session=${session}`);
   const name = encodeURIComponent(c.env.APP_NAME);
   const permission = encodeURIComponent(c.env.APP_PERMISSIONS);
@@ -37,14 +60,20 @@ export async function handleLogin(c: Context<{ Bindings: Env }>) {
  * GET /auth/callback?session=...
  *   1. session を取得 → Misskey の /api/miauth/{session}/check を叩く
  *   2. 取得した token + user info を cookie に保存
- *   3. / に redirect
+ *   3. ログインを始めたページ (なければ /) に redirect
  */
 export async function handleCallback(c: Context<{ Bindings: Env }>) {
   const session = c.req.query('session');
   if (!session) return c.text('missing session parameter', 400);
-  const expected = await getSignedCookie(c, c.env.SESSION_SECRET, MIAUTH_STATE_COOKIE);
+  const raw = await getSignedCookie(c, c.env.SESSION_SECRET, MIAUTH_STATE_COOKIE);
   deleteCookie(c, MIAUTH_STATE_COOKIE, { path: '/auth/callback' });
-  if (typeof expected !== 'string' || expected !== session) {
+  let state: MiAuthState | null = null;
+  try {
+    state = typeof raw === 'string' ? (JSON.parse(raw) as MiAuthState) : null;
+  } catch {
+    state = null;
+  }
+  if (!state || state.session !== session) {
     return c.text('ログインの有効期限が切れたか、別のブラウザで開始されたログインです。もう一度ログインしてください。', 400);
   }
 
@@ -76,7 +105,7 @@ export async function handleCallback(c: Context<{ Bindings: Env }>) {
     issuedAt: Date.now(),
   };
   await writeSession(c, sess);
-  return c.redirect('/');
+  return c.redirect(safeReturnTo(state.returnTo, new URL(c.req.url).origin));
 }
 
 /**

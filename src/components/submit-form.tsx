@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Mfm } from './mfm';
+import { loginHref } from '../lib/login';
 
 type Me =
   | { loggedIn: true; userId: string; username: string; name: string | null }
@@ -194,7 +195,7 @@ export function SubmitForm() {
         <p className="text-[var(--color-text)]">
           申請にはいかすきーアカウントでのログインが必要です。
         </p>
-        <a href="/login" className="btn btn-primary btn-lg">
+        <a href={loginHref()} className="btn btn-primary btn-lg">
           いかすきーでログイン
         </a>
       </div>

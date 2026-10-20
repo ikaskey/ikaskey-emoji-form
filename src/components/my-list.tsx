@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Mfm } from './mfm';
 import { StatusStamp, statusLabel } from './status-stamp';
 import { formatDateTime } from '../lib/datetime';
+import { loginHref } from '../lib/login';
 
 type Me =
   | { loggedIn: true; userId: string; username: string; name: string | null }
@@ -76,7 +77,7 @@ export function MyList() {
         <p className="text-[var(--color-text)]">
           ログインすると過去の申請が表示されます。
         </p>
-        <a href="/login" className="btn btn-primary">
+        <a href={loginHref()} className="btn btn-primary">
           いかすきーでログイン
         </a>
       </div>

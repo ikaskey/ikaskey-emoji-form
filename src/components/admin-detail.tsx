@@ -5,6 +5,7 @@ import { Mfm } from './mfm';
 import { StatusStamp } from './status-stamp';
 import { formatDateTime } from '../lib/datetime';
 import { runAction } from '../lib/run-action';
+import { loginHref } from '../lib/login';
 
 type Application = {
   id: number;
@@ -102,7 +103,7 @@ export function AdminDetail({ id }: { id: number }) {
       <div className="alert alert-error">
         {error}
         {error.includes('ログイン') && (
-          <a href="/login" className="ml-2 font-semibold underline">
+          <a href={loginHref()} className="ml-2 font-semibold underline">
             ログイン
           </a>
         )}
