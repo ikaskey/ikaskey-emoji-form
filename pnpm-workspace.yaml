@@ -2,3 +2,8 @@ allowBuilds:
   esbuild: false
   sharp: false
   workerd: false
+
+# wrangler / @cloudflare/vite-plugin 最新版の miniflare が固定している undici 7.29.1 に
+# 既知の脆弱性があるため、同じメジャー内の修正版に上げる (ローカル開発ツール側の依存)
+overrides:
+  undici: ^7.30.1
